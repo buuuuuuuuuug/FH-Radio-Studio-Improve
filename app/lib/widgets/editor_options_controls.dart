@@ -75,7 +75,7 @@ class EditorOptionsControls extends ConsumerWidget {
           builder: (context, constraints) {
             final sync = option(
               'PL 自动同步 TL',
-              '同步起止时间与确认状态',
+              'TL 比赛中循环，PL 冲线后循环；同步起止时间与确认状态',
               options.syncPostLoop,
               (v) => controller.update(syncPostLoop: v),
             ).tourAnchor('sync');
@@ -97,7 +97,7 @@ class EditorOptionsControls extends ConsumerWidget {
                 );
             final expansion = option(
               '电台扩容 · 实验功能',
-              '允许超过原版曲目数量',
+              '允许超过原版曲目数量；使用分场景编辑时必须开启',
               options.expansionEnabled,
               (v) {
                 if (!controller.update(expansionEnabled: v)) {
@@ -112,7 +112,7 @@ class EditorOptionsControls extends ConsumerWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            '请先将以下电台减少到原版容量以内：',
+                            '请先关闭分场景编辑；如有超出原版容量的电台，还需减少曲目：',
                             style: RmText.sans(12, color: rm.fg2),
                           ),
                           const SizedBox(height: 12),
@@ -169,6 +169,7 @@ class EditorOptionsControls extends ConsumerWidget {
                     expansion,
                   ] else
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(child: sync),
                         Container(width: 1, height: 64, color: rm.border),

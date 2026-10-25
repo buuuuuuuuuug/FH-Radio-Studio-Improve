@@ -50,6 +50,9 @@ class PlaylistColumn extends StatefulWidget {
     int? originalCount,
     required List<Widget> children,
     VoidCallback? onRestoreBuiltin,
+    String? headerActionLabel,
+    String? headerActionTooltip,
+    VoidCallback? onHeaderAction,
   }) {
     return PlaylistColumn(
       kind: isCustom ? ColumnKind.customRadio : ColumnKind.builtinRadio,
@@ -62,6 +65,9 @@ class PlaylistColumn extends StatefulWidget {
         capacity: capacity ?? radio.slot,
         originalCount: originalCount ?? radio.slot,
         onRestoreBuiltin: onRestoreBuiltin,
+        headerActionLabel: headerActionLabel,
+        headerActionTooltip: headerActionTooltip,
+        onHeaderAction: onHeaderAction,
       ),
       emptyText: isCustom ? '空 · 拖入池中曲目' : '无原版数据',
       children: children,
@@ -79,6 +85,9 @@ class PlaylistColumn extends StatefulWidget {
     required int itemCount,
     required IndexedWidgetBuilder itemBuilder,
     VoidCallback? onRestoreBuiltin,
+    String? headerActionLabel,
+    String? headerActionTooltip,
+    VoidCallback? onHeaderAction,
     Widget? filterControls,
   }) => PlaylistColumn.builder(
     kind: isCustom ? ColumnKind.customRadio : ColumnKind.builtinRadio,
@@ -91,6 +100,9 @@ class PlaylistColumn extends StatefulWidget {
       capacity: capacity ?? radio.slot,
       originalCount: originalCount ?? radio.slot,
       onRestoreBuiltin: onRestoreBuiltin,
+      headerActionLabel: headerActionLabel,
+      headerActionTooltip: headerActionTooltip,
+      onHeaderAction: onHeaderAction,
     ),
     filterControls: filterControls,
     itemCount: itemCount,
@@ -173,7 +185,7 @@ class _PlaylistColumnState extends State<PlaylistColumn> {
             children: [
               Container(
                 padding: EdgeInsets.symmetric(
-                  horizontal: 14,
+                  horizontal: 8,
                   vertical: pool ? 7 : 12,
                 ),
                 decoration: BoxDecoration(
@@ -182,7 +194,7 @@ class _PlaylistColumnState extends State<PlaylistColumn> {
                 child: widget.header,
               ),
               Container(
-                padding: const EdgeInsets.fromLTRB(14, 4, 14, 6),
+                padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
                 decoration: BoxDecoration(
                   border: Border(bottom: BorderSide(color: rm.border)),
                 ),
@@ -294,6 +306,9 @@ class _RadioHeader extends StatelessWidget {
     this.expanded = false,
     required this.originalCount,
     this.onRestoreBuiltin,
+    this.headerActionLabel,
+    this.headerActionTooltip,
+    this.onHeaderAction,
   });
 
   final RadioStation radio;
@@ -304,6 +319,9 @@ class _RadioHeader extends StatelessWidget {
   final bool expanded;
   final int originalCount;
   final VoidCallback? onRestoreBuiltin;
+  final String? headerActionLabel;
+  final String? headerActionTooltip;
+  final VoidCallback? onHeaderAction;
 
   @override
   Widget build(BuildContext context) {
@@ -368,7 +386,17 @@ class _RadioHeader extends StatelessWidget {
                     variant: RmChipVariant.muted,
                     leading: RmIcon('lock', size: 9),
                   ),
-            if (isCustom && onRestoreBuiltin != null) ...[
+            if (headerActionLabel != null) ...[
+              const SizedBox(width: 4),
+              RmButton.icon(
+                onPressed: onHeaderAction,
+                icon: const Icon(Icons.swap_horiz, size: 14),
+                variant: RmButtonVariant.ghost,
+                tooltip: headerActionLabel,
+              ),
+            ] else if (headerActionLabel == null &&
+                isCustom &&
+                onRestoreBuiltin != null) ...[
               const SizedBox(width: 4),
               RmButton.icon(
                 onPressed: onRestoreBuiltin,

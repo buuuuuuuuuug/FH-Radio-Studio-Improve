@@ -305,30 +305,29 @@ void main() {
     expect(c.read(editorOptionsProvider).sirenEnabled, isTrue);
     expect(c.read(editorOptionsProvider).manualOnly, isFalse);
   });
-  testWidgets(
-    'browse controls fill wide lists and hide duplicate artist sort',
-    (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: buildAppTheme(
-            brightness: Brightness.light,
-            accent: AppAccent.lime,
-          ),
-          home: Scaffold(
-            body: SongBrowseControls(
-              value: const SongBrowse(),
-              onChanged: (_) {},
-            ),
+  testWidgets('browse controls fill wide lists and offer one artist sort', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppTheme(
+          brightness: Brightness.light,
+          accent: AppAccent.lime,
+        ),
+        home: Scaffold(
+          body: SongBrowseControls(
+            value: const SongBrowse(),
+            onChanged: (_) {},
           ),
         ),
-      );
-      expect(find.text('歌手名称'), findsNothing);
-      final controls = find.byType(DropdownButton<String>);
-      final right = tester.getTopRight(controls.last).dx;
-      expect(right, greaterThan(750));
-      expect(tester.takeException(), isNull);
-    },
-  );
+      ),
+    );
+    expect(find.text('歌手名称'), findsNothing);
+    final controls = find.byType(DropdownButton<String>);
+    final right = tester.getTopRight(controls.last).dx;
+    expect(right, greaterThan(750));
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('sync and expansion controls share one row at desktop widths', (
     tester,
   ) async {

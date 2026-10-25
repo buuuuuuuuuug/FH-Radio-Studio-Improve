@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/project_workspace.dart';
 import '../core/playlist_plan.dart';
+import '../core/playlist_timing_requirements.dart';
 import '../core/fh_radio_studio_cli.dart';
 import '../core/package_manifest.dart';
 import '../core/path_keys.dart';
@@ -641,12 +642,17 @@ class PackageTrackAssignment {
     required this.radioLabel,
     required this.slot,
     this.playlistTypes = const ['FreeRoam', 'Event'],
+    this.playlistSlots = const {},
   });
 
   final String source;
   final String radioLabel;
   final int slot;
   final List<String> playlistTypes;
+  final Map<String, int> playlistSlots;
+
+  int slotForPlaylist(String type) =>
+      playlistSlots[PlaylistAssignment.normalizePlaylistType(type)] ?? slot;
 
   String get label {
     final types = normalizedPlaylistTypes;
@@ -2358,6 +2364,7 @@ PackageArtifactSummary? _readPackageSummaryFromManifest(File? manifest) {
           radioLabel: radioLabel,
           slot: slotIndex + 1,
           playlistTypes: types,
+          playlistSlots: _objectPlaylistSlotMap(map['playlist_slots']),
         ),
       );
     }
@@ -4405,6 +4412,10 @@ class StudioController extends StateNotifier<StudioState> {
         planForBuild = seeded;
       }
     }
+    if (!expansionEnabled && planForBuild.splitPlaylistTypes == true) {
+      _append('分场景编辑需要开启电台扩容。请在概览基础设置中开启后重试；现有歌单和准备包已保留。');
+      return false;
+    }
     if (!expansionEnabled && currentPackageSummary != null) {
       final sourcesByRadio = <String, Set<String>>{};
       for (final assignment in planForBuild.assignments.values) {
@@ -4444,7 +4455,7 @@ class StudioController extends StateNotifier<StudioState> {
       }
       return false;
     }
-    final musicInputs = draft.inputs.isNotEmpty
+    final musicInputs = draft.hasPlan
         ? draft.inputs
         : _musicInputsFromPackageSummary(previousAppliedSummary);
     final playlistFromPackage = canBuildFromPreviousApplied
@@ -4468,16 +4479,25 @@ class StudioController extends StateNotifier<StudioState> {
     }
     // Reject incomplete saved nodes before replacing an existing prepared package.
     final timings = TrackTimingStore.readAll(state.projectDir);
+    final timingPlan = planForBuild.hasDraft
+        ? planForBuild
+        : previousAppliedSummary == null
+        ? const PlaylistPlan.empty()
+        : _planFromPackageSummary(previousAppliedSummary);
+    final freeRoamOnlySources = <String>{};
     final unfinished = FhRadioStudioProject.collectAudioFiles(musicInputs)
-        .where(
-          (file) =>
-              timings[TrackTimingConfig.keyForPath(file.path)]?.allConfirmed !=
-              true,
-        )
+        .where((file) {
+          final key = TrackTimingConfig.keyForPath(file.path);
+          if (isFreeRoamOnlySource(timingPlan, file.path)) {
+            freeRoamOnlySources.add(key);
+            return false;
+          }
+          return timings[key]?.allConfirmed != true;
+        })
         .toList();
     if (unfinished.isNotEmpty) {
       _append(
-        '无法构建：${unfinished.length} 首歌曲的时间点未完成或未确认。请先配置并保存：\n${unfinished.map((f) => p.basename(f.path)).join('\n')}',
+        '无法构建：${unfinished.length} 首比赛歌曲的时间点未完成或未确认。仅漫游歌曲可使用自动点位；请配置并保存以下歌曲：\n${unfinished.map((f) => p.basename(f.path)).join('\n')}',
       );
       return false;
     }
@@ -4485,6 +4505,7 @@ class StudioController extends StateNotifier<StudioState> {
     final timingManifest = TrackTimingStore.writeBuildManifest(
       projectDir: state.projectDir,
       musicInputs: musicInputs,
+      freeRoamOnlySources: freeRoamOnlySources,
     );
     var built = false;
     await _withBusy('构建电台包', () async {
@@ -4641,12 +4662,20 @@ class StudioController extends StateNotifier<StudioState> {
         return;
       }
       final outDir = FhRadioStudioProject.pendingPackageDir(state.projectDir);
+      final packageSummary =
+          state.lastPackageSummary ?? _readPackageSummary(state.lastPackageDir);
+      final timingPlan = packageSummary == null
+          ? const PlaylistPlan.empty()
+          : _planFromPackageSummary(packageSummary);
       final timingManifest = TrackTimingStore.writeBuildManifest(
         projectDir: state.projectDir,
         musicInputs: musicInputs,
+        freeRoamOnlySources: {
+          for (final source in musicInputs)
+            if (isFreeRoamOnlySource(timingPlan, source))
+              TrackTimingConfig.keyForPath(source),
+        },
       );
-      final packageSummary =
-          state.lastPackageSummary ?? _readPackageSummary(state.lastPackageDir);
       final loudnessOffsetLu = normalizePackageLoudnessOffsetLu(
         packageSummary?.loudnessOffsetLu ?? kDefaultPackageLoudnessOffsetLu,
       );
@@ -4771,7 +4800,7 @@ class StudioController extends StateNotifier<StudioState> {
           source: item.source,
           radioCode: radioCode,
           playlistType: playlistType,
-          slot: item.slot,
+          slot: item.slotForPlaylist(playlistType),
         );
       }
     }

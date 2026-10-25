@@ -117,7 +117,7 @@ void main() {
         expect(result, isNull);
         await t.sendKeyEvent(LogicalKeyboardKey.enter);
         await t.pumpAndSettle();
-        expect(result, (radio: 'R2', type: 'FreeRoam', limit: 32));
+        expect(result, (radio: 'R2', type: 'Event', limit: 32));
         expect(t.takeException(), isNull);
       },
     );

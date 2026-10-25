@@ -72,6 +72,12 @@ class EditorOptionsController extends StateNotifier<EditorOptions> {
     bool? expansionEnabled,
     bool? slmEnabled,
   }) {
+    if (expansionEnabled == false && state.expansionEnabled) {
+      final plan = ref.read(effectivePlaylistPlanProvider);
+      if (plan.splitPlaylistTypes == true) {
+        return false;
+      }
+    }
     if (expansionEnabled == false &&
         state.expansionEnabled &&
         expansionOverflow().isNotEmpty) {

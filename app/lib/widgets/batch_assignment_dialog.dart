@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../domain/radio_library.dart';
-import '../state/editor_shortcuts.dart';
 import '../theme/app_theme.dart';
 import '../theme/text_styles.dart';
 import '../theme/tokens.dart';
 import 'assignment_radio_choice.dart';
+import 'assignment_shortcuts.dart';
 import 'rm_button.dart';
 
 class BatchAssignmentInfo {
@@ -68,21 +68,29 @@ class _BatchAssignmentDialogState extends State<BatchAssignmentDialog> {
       focusNode: focus,
       autofocus: true,
       onKeyEvent: (_, e) {
-        if (e is! KeyDownEvent ||
-            HardwareKeyboard.instance.isControlPressed ||
-            HardwareKeyboard.instance.isAltPressed ||
-            HardwareKeyboard.instance.isShiftPressed ||
-            HardwareKeyboard.instance.isMetaPressed) {
+        if (!assignmentKeyboardAvailable(context, e)) {
           return KeyEventResult.ignored;
         }
-        if (e.logicalKey == LogicalKeyboardKey.enter) {
+        if (e.logicalKey == LogicalKeyboardKey.escape &&
+            !HardwareKeyboard.instance.isControlPressed) {
+          Navigator.pop(context);
+          return KeyEventResult.handled;
+        }
+        if (e.logicalKey == LogicalKeyboardKey.enter &&
+            !HardwareKeyboard.instance.isControlPressed) {
           confirm();
           return KeyEventResult.handled;
         }
-        final number = shortcutKey(e.logicalKey).keyLabel;
-        final matches = widget.radios.where((r) => r.code == 'R$number');
-        if (matches.isNotEmpty) {
-          setState(() => _radio = matches.first.code);
+        final shortcut = assignmentDigitShortcut(
+          e,
+          splitTypes: widget.splitTypes,
+        );
+        final matches = widget.radios.where((r) => r.code == shortcut?.radio);
+        if (shortcut != null && matches.isNotEmpty) {
+          setState(() {
+            _radio = matches.first.code;
+            _type = shortcut.type;
+          });
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
@@ -139,7 +147,10 @@ class _BatchAssignmentDialogState extends State<BatchAssignmentDialog> {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            '按 1–9 选择 · 支持小键盘 · Enter 分配 · Esc 取消',
+                            assignmentShortcutHint(
+                              splitTypes: widget.splitTypes,
+                              batch: true,
+                            ),
                             style: RmText.sans(11, color: rm.fg3),
                           ),
                         ],
@@ -265,7 +276,7 @@ class _BatchAssignmentDialogState extends State<BatchAssignmentDialog> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              '新增 ${info.added} 首 · 分配后 ${info.total} / ${info.limit == 4096 ? '扩容' : info.limit} 首\n${exceeds
+                              '${widget.splitTypes ? '目标 $_radio · ${_type == 'Event' ? '比赛' : '漫游'}\n' : ''}新增 ${info.added} 首 · 分配后 ${info.total} / ${info.limit == 4096 ? '扩容' : info.limit} 首\n${exceeds
                                   ? '超过电台容量，请减少选择或更换电台；本次不会部分分配。'
                                   : info.added == 0
                                   ? '这些歌曲已在目标电台，无需重复分配。'

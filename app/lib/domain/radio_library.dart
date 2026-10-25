@@ -69,6 +69,7 @@ class PoolTrack {
     required this.key,
     required this.configured,
     required this.confirmed,
+    this.freeRoamOnly = false,
     this.sampleRate,
     this.channels,
     this.samples,
@@ -94,6 +95,8 @@ class PoolTrack {
   final String key;
   final bool configured;
   final int confirmed; // 0..4 — 已确认的 time group 数
+  final bool freeRoamOnly;
+  bool get readyForBuild => configured || freeRoamOnly;
   final int? sampleRate;
   final int? channels;
   final int? samples;
@@ -124,6 +127,7 @@ class PoolTrack {
       key: key,
       configured: configured,
       confirmed: confirmed,
+      freeRoamOnly: freeRoamOnly,
       sampleRate: sampleRate,
       channels: channels,
       samples: samples,

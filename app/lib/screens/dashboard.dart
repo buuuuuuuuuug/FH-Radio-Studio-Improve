@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import '../core/game_deployment_target.dart';
 import '../widgets/editor_options_controls.dart';
 import '../widgets/seamless_loop_options.dart';
+import '../widgets/split_playlist_setting.dart';
 import '../state/editor_options.dart';
 
 import 'package:file_picker/file_picker.dart';
@@ -2453,18 +2454,6 @@ class _SettingsStrip extends StatelessWidget {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     _SavedPill(busy: state.busy, label: state.busyLabel),
-                    RmButton(
-                      onPressed: state.busy
-                          ? null
-                          : () {
-                              controller.setSourceLang(state.gameSourceLang);
-                              controller.setTargetLang(state.gameTargetLang);
-                            },
-                      size: RmButtonSize.sm,
-                      variant: RmButtonVariant.ghost,
-                      leading: const RmIcon('refresh', size: 11),
-                      label: '还原默认',
-                    ),
                   ],
                 );
                 final left = Column(
@@ -2480,7 +2469,7 @@ class _SettingsStrip extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '游戏与语言 · 分析模式 · 循环同步 · 电台扩容',
+                      '游戏与语言 · 分析模式 · 循环同步 · 实验功能',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: RmText.sans(11.5, color: rm.fg3),
@@ -2518,12 +2507,13 @@ class _SettingsStrip extends StatelessWidget {
                   analysisControl: _AiPipelineSetting(
                     state: state,
                     controller: controller,
-                  ),
+                  ).tourAnchor('analysis'),
                 ),
-                const SeamlessLoopOptions(),
+                const SeamlessLoopOptions().tourAnchor('seamless'),
+                const SplitPlaylistSetting(showAsSwitch: true),
               ],
             ),
-          ).tourAnchor('analysis'),
+          ),
         ],
       ),
     );

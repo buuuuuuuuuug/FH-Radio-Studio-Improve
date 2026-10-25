@@ -466,7 +466,8 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
       if (TimeInputValidation.invalid.isNotEmpty) return;
       final n = ref.read(replaceEditorProvider(widget.trackId).notifier);
       final state = ref.read(replaceEditorProvider(widget.trackId));
-      if (state.allConfirmed || (state.dirty && state.bpmManual)) {
+      if (state.allConfirmed ||
+          (state.dirty && (state.bpmManual || state.track.freeRoamOnly))) {
         _saveConfig(context, n, title: state.track.title);
       } else {
         ScaffoldMessenger.of(
@@ -830,6 +831,12 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
           ).tourAnchor('save'),
         ),
         const SizedBox(height: 8),
+        if (s.track.freeRoamOnly)
+          const RmBanner(
+            kind: RmBannerKind.info,
+            title: '仅用于漫游，无需确认比赛时间点。',
+            body: '构建时自动补全有效默认点位，也可按需手动编辑。加入比赛清单后，需要完成四组配置。',
+          ),
         if (s.analyzing || s.error != null || s.saved || s.dirty) ...[
           const SizedBox(height: 8),
           KeyedSubtree(
@@ -968,7 +975,9 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
         ),
         RmButton(
           key: const ValueKey('editor-save'),
-          onPressed: s.allConfirmed || (s.dirty && s.bpmManual)
+          onPressed:
+              s.allConfirmed ||
+                  (s.dirty && (s.bpmManual || s.track.freeRoamOnly))
               ? () => _saveConfig(context, n, title: s.track.title)
               : null,
           variant: RmButtonVariant.primary,

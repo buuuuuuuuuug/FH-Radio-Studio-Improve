@@ -58,6 +58,12 @@ List<PoolTrack> buildRealPoolTracks(
   Map<String, TrackMetadata> metadata = const {},
   Map<String, SirenImportEntry> sirenImports = const {},
 }) {
+  final freeSources = <String>{};
+  final eventSources = <String>{};
+  for (final assignment in assignments.values.where((a) => a.isAssigned)) {
+    final key = realTrackKeyForPath(assignment.source);
+    (assignment.playlistType == 'Event' ? eventSources : freeSources).add(key);
+  }
   final files = <File>[];
   final seen = <String>{};
   for (final raw in inputs) {
@@ -90,6 +96,9 @@ List<PoolTrack> buildRealPoolTracks(
       poolTrackFromFile(
         file,
         config: configs[realTrackKeyForPath(file.path)],
+        freeRoamOnly:
+            freeSources.contains(realTrackKeyForPath(file.path)) &&
+            !eventSources.contains(realTrackKeyForPath(file.path)),
         assignment: firstAssignmentForPath(assignments, file.path),
         metadata: metadata[realTrackKeyForPath(file.path)],
         sirenImport: sirenImports[realTrackKeyForPath(file.path)],
@@ -129,6 +138,7 @@ int _playlistSortKey(String value) {
 
 PoolTrack poolTrackFromFile(
   File file, {
+  bool freeRoamOnly = false,
   dynamic config,
   dynamic assignment,
   TrackMetadata? metadata,
@@ -164,6 +174,7 @@ PoolTrack poolTrackFromFile(
     bpm: bpm,
     key: '待分析',
     configured: configured,
+    freeRoamOnly: freeRoamOnly,
     confirmed: confirmed,
     sampleRate: metadata?.sampleRate,
     channels: metadata?.channels,

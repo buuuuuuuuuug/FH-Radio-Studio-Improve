@@ -100,7 +100,7 @@ def _read_radio_info_playlists(xml_file: Path) -> Dict[str, Dict[str, List[_Diff
 
         samples: Dict[str, _DiffTrack] = {}
         sample_order: List[_DiffTrack] = []
-        for sample in station.iter("Sample"):
+        for sample in station.findall("./SampleList[@Type='Track']/Sample"):
             sound_name = (sample.get("SoundName") or "").strip()
             if not sound_name:
                 continue
@@ -115,16 +115,20 @@ def _read_radio_info_playlists(xml_file: Path) -> Dict[str, Dict[str, List[_Diff
         lists: Dict[str, List[_DiffTrack]] = {}
         for playlist_type in PLAYLIST_TYPES:
             tracks: List[_DiffTrack] = []
+            playlist_found = False
             for playlist in station.findall("PlayList"):
                 raw_type = playlist.get("Type") or "FreeRoam"
                 if normalize_playlist_type(raw_type) != playlist_type:
                     continue
+                playlist_found = True
                 for entry in playlist.findall("Entry"):
                     entry_name = (entry.get("Name") or "").strip()
                     track = samples.get(entry_name)
                     if track is not None:
                         tracks.append(track)
-            lists[playlist_type] = tracks if tracks else sample_order
+            # An explicitly empty scene must stay empty. The legacy fallback is
+            # only for XML versions that omit the scene's PlayList altogether.
+            lists[playlist_type] = tracks if playlist_found else sample_order
         out[radio_code] = lists
     return out
 

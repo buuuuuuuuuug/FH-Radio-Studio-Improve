@@ -118,6 +118,8 @@ class PlaylistPlan {
   PlaylistPlan({
     required Map<String, PlaylistAssignment> assignments,
     Set<String> builtinTargets = const {},
+    this.splitPlaylistTypes,
+    this.splitSnapshot,
   }) : assignments = Map.unmodifiable(assignments),
        builtinTargets = Set.unmodifiable(builtinTargets);
 
@@ -142,10 +144,94 @@ class PlaylistPlan {
 
   const PlaylistPlan.empty()
     : assignments = const {},
-      builtinTargets = const {};
+      builtinTargets = const {},
+      splitPlaylistTypes = null,
+      splitSnapshot = null;
 
   final Map<String, PlaylistAssignment> assignments;
   final Set<String> builtinTargets;
+
+  /// Local editor state only. Null preserves legacy layout detection.
+  final bool? splitPlaylistTypes;
+
+  /// Frozen scene layout retained while editing a unified active layout.
+  final PlaylistPlan? splitSnapshot;
+
+  PlaylistPlan copyWith({
+    Map<String, PlaylistAssignment>? assignments,
+    Set<String>? builtinTargets,
+  }) => PlaylistPlan(
+    assignments: assignments ?? this.assignments,
+    builtinTargets: builtinTargets ?? this.builtinTargets,
+    splitPlaylistTypes: splitPlaylistTypes,
+    splitSnapshot: splitSnapshot,
+  );
+
+  PlaylistPlan withSceneStateFrom(PlaylistPlan other) => PlaylistPlan(
+    assignments: assignments,
+    builtinTargets: builtinTargets,
+    splitPlaylistTypes: other.splitPlaylistTypes,
+    splitSnapshot: other.splitSnapshot,
+  );
+
+  PlaylistPlan get _activeOnly =>
+      PlaylistPlan(assignments: assignments, builtinTargets: builtinTargets);
+
+  PlaylistPlan setSplitMode(bool enabled, {String keepType = 'FreeRoam'}) {
+    if (enabled) {
+      final restored = splitSnapshot?.pruneMissingSources() ?? this;
+      return PlaylistPlan(
+        assignments: restored.assignments,
+        builtinTargets: restored.builtinTargets,
+        splitPlaylistTypes: true,
+      );
+    }
+    final unified = syncPlaylistTypesFrom(keepType);
+    return PlaylistPlan(
+      assignments: unified.assignments,
+      builtinTargets: unified.builtinTargets,
+      splitPlaylistTypes: false,
+      splitSnapshot: splitSnapshot ?? _activeOnly,
+    );
+  }
+
+  /// Used only when restoring a saved/frozen editor layout, never when building.
+  PlaylistPlan pruneMissingSources() {
+    final kept = assignments.values
+        .where((a) => File(a.source).existsSync())
+        .toList();
+    return PlaylistPlan(
+      assignments: _compactedAssignments(kept),
+      builtinTargets: builtinTargets,
+      splitPlaylistTypes: splitPlaylistTypes,
+      splitSnapshot: splitSnapshot?.pruneMissingSources(),
+    );
+  }
+
+  PlaylistPlan removeDeletedSourcesEverywhere(Iterable<String> sources) {
+    final paths = sources.map(PlaylistAssignment.keyForPath).toSet();
+    final kept = assignments.values
+        .where((a) => !paths.contains(PlaylistAssignment.keyForPath(a.source)))
+        .toList();
+    return PlaylistPlan(
+      assignments: _compactedAssignments(kept),
+      builtinTargets: builtinTargets,
+      splitPlaylistTypes: splitPlaylistTypes,
+      splitSnapshot: splitSnapshot?.removeDeletedSourcesEverywhere(sources),
+    );
+  }
+
+  String encodeForStorage() {
+    final payload = jsonDecode(encodeForCli()) as Map<String, dynamic>;
+    if (splitPlaylistTypes != null || splitSnapshot != null) {
+      payload['scene_editing'] = {
+        'enabled': splitPlaylistTypes,
+        if (splitSnapshot != null)
+          'snapshot': jsonDecode(splitSnapshot!.encodeForCli()),
+      };
+    }
+    return jsonEncode(payload);
+  }
 
   bool get hasDraft => assignments.isNotEmpty || builtinTargets.isNotEmpty;
 
@@ -239,7 +325,7 @@ class PlaylistPlan {
       final next = ordered[i].copyWith(slot: i + 1);
       result[next.assignmentKey] = next;
     }
-    return PlaylistPlan(assignments: result, builtinTargets: builtinTargets);
+    return copyWith(assignments: result);
   }
 
   bool hasAssignmentsForRadio(String radioCode, String playlistType) {
@@ -248,6 +334,10 @@ class PlaylistPlan {
 
   bool get hasSplitPlaylistDifferences {
     for (final radioCode in _radioCodesWithPlaylistState()) {
+      if (hasBuiltinOverride(radioCode, 'FreeRoam') !=
+          hasBuiltinOverride(radioCode, 'Event')) {
+        return true;
+      }
       final freeRoam = _playlistSignature(radioCode, 'FreeRoam');
       final event = _playlistSignature(radioCode, 'Event');
       if (!_sameStringList(freeRoam, event)) return true;
@@ -325,9 +415,9 @@ class PlaylistPlan {
       ..remove(_targetKey(radioCode, playlistType));
     final existing = assignments[assignment.assignmentKey];
     if (existing != null && existing.isAssigned) {
-      return PlaylistPlan(assignments: assignments, builtinTargets: targets);
+      return copyWith(builtinTargets: targets);
     }
-    return PlaylistPlan(
+    return copyWith(
       assignments: {...assignments, assignment.assignmentKey: assignment},
       builtinTargets: targets,
     );
@@ -354,7 +444,7 @@ class PlaylistPlan {
       if (type != null && assignment.playlistType != type) return true;
       return false;
     }).toList();
-    return PlaylistPlan(
+    return copyWith(
       assignments: _compactedAssignments(kept),
       builtinTargets: builtinTargets,
     );
@@ -372,7 +462,7 @@ class PlaylistPlan {
     final kept = assignments.values.where((assignment) {
       return !keys.contains(assignment.trackKey);
     }).toList();
-    return PlaylistPlan(
+    return copyWith(
       assignments: _compactedAssignments(kept),
       builtinTargets: builtinTargets,
     );
@@ -387,7 +477,7 @@ class PlaylistPlan {
     final kept = assignments.values.where((assignment) {
       return assignment.radioCode != radio || assignment.playlistType != type;
     }).toList();
-    return PlaylistPlan(
+    return copyWith(
       assignments: _compactedAssignments(kept),
       builtinTargets: {...builtinTargets, _targetKey(radio, type)},
     );
@@ -436,9 +526,45 @@ class PlaylistPlan {
       }
     }
 
-    return PlaylistPlan(
+    return copyWith(
       assignments: _compactedAssignments(out.values.toList()),
       builtinTargets: targets,
+    );
+  }
+
+  /// Replace one station's target scene while preserving the source scene,
+  /// other stations and the local split-mode snapshot.
+  PlaylistPlan copyScenePlaylist({
+    required String radioCode,
+    required String fromType,
+    required String toType,
+  }) {
+    final radio = _canonicalRadioCodeOrEmpty(radioCode);
+    final from = PlaylistAssignment.normalizePlaylistType(fromType);
+    final to = PlaylistAssignment.normalizePlaylistType(toType);
+    if (radio.isEmpty || from == to) return this;
+    final source = assignmentsForRadio(radio, from);
+    // A scene cannot independently switch the shared station bank to builtin.
+    if (source.isEmpty || hasBuiltinOverride(radio, from)) return this;
+    final result = <String, PlaylistAssignment>{
+      for (final assignment in assignments.values)
+        if (assignment.radioCode != radio || assignment.playlistType != to)
+          assignment.assignmentKey: assignment,
+    };
+    for (var index = 0; index < source.length; index++) {
+      final assignment = source[index];
+      final copied = PlaylistAssignment(
+        source: assignment.source,
+        trackKey: assignment.trackKey,
+        radioCode: assignment.radioCode,
+        playlistType: to,
+        slot: index + 1,
+      );
+      result[copied.assignmentKey] = copied;
+    }
+    return copyWith(
+      assignments: result,
+      builtinTargets: {...builtinTargets}..remove(_targetKey(radio, to)),
     );
   }
 
@@ -611,7 +737,7 @@ class PlaylistPlanStore {
     writeProjectJsonSync(
       projectDir: projectDir,
       file: file,
-      payload: jsonDecode(plan.encodeForCli()) as Map<String, dynamic>,
+      payload: jsonDecode(plan.encodeForStorage()) as Map<String, dynamic>,
     );
   }
 
@@ -622,7 +748,17 @@ class PlaylistPlanStore {
       if (normalized == null) continue;
       out[normalized.assignmentKey] = normalized;
     }
-    return PlaylistPlan(assignments: out, builtinTargets: plan.builtinTargets);
+    return PlaylistPlan(
+      assignments: out,
+      builtinTargets: plan.builtinTargets,
+      splitPlaylistTypes: plan.splitPlaylistTypes,
+      splitSnapshot: plan.splitSnapshot == null
+          ? null
+          : projectSourcesOnly(
+              projectDir,
+              plan.splitSnapshot!,
+            ).pruneMissingSources(),
+    );
   }
 
   static PlaylistAssignment? _normalizeProjectSource(
@@ -684,7 +820,17 @@ class PlaylistPlanCodec {
         if (key != null) builtinTargets.add(key);
       }
     }
-    return PlaylistPlan(assignments: out, builtinTargets: builtinTargets);
+    final local = decoded is Map ? decoded['scene_editing'] : null;
+    return PlaylistPlan(
+      assignments: out,
+      builtinTargets: builtinTargets,
+      splitPlaylistTypes: local is Map && local['enabled'] is bool
+          ? local['enabled'] as bool
+          : null,
+      splitSnapshot: local is Map && local['snapshot'] is Map
+          ? fromDecoded(local['snapshot'], projectDir: projectDir)._activeOnly
+          : null,
+    );
   }
 }
 

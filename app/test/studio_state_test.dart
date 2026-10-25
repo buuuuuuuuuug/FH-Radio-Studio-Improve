@@ -1434,6 +1434,54 @@ Created AI model manifest scaffold: C:\\FH Radio Studio\\models\\ai_tools_manife
       },
     );
 
+    test('restoring builtin ignores missing historical custom songs', () async {
+      final projectDir = p.join(tempRoot.path, 'restore-builtin-history');
+      final paths = _writeIntegrityFixture(
+        projectDir,
+        deployedBytes: 'original',
+      );
+      Directory(paths.packageRoot).deleteSync(recursive: true);
+      final missingSource = p.join(
+        FhRadioStudioProject.sourcesDir(projectDir),
+        'old-free.wav',
+      );
+      _writePackageManifestFile(
+        File(FhRadioStudioProject.lastAppliedPackageManifestPath(projectDir)),
+        source: missingSource,
+        radioCode: 'R4',
+        playlistType: 'FreeRoam',
+        slot: 1,
+      );
+      final plan = const PlaylistPlan.empty()
+          .restoreBuiltin(radioCode: 'R4', playlistType: 'FreeRoam')
+          .restoreBuiltin(radioCode: 'R4', playlistType: 'Event');
+      SharedPreferences.setMockInitialValues({_projectDirKey: projectDir});
+      final runtime = _testUvRuntime(tempRoot, 'restore-builtin-runtime');
+      final cli = _RecordingCli(runtime);
+      final controller = _RecordingCliStudioController(
+        await SharedPreferences.getInstance(),
+        cli,
+      );
+      addTearDown(controller.dispose);
+      controller.setStateForTest(
+        controller.state.copyWith(repoRoot: runtime.projectRoot),
+      );
+      expect(
+        await controller.buildPackage(plan: plan),
+        isTrue,
+        reason: controller.state.log.join('\n'),
+      );
+      final args = cli.commands.singleWhere(
+        (args) => args.first == 'build-package',
+      );
+      expect(args, isNot(contains(missingSource)));
+      final sent = PlaylistPlanCodec.decodeJson(
+        cli.stdinForCommand('build-package')!,
+      );
+      expect(sent.assignments, isEmpty);
+      expect(sent.builtinTargets, {'R4|FreeRoam', 'R4|Event'});
+    });
+
     for (final expansion in [false, true]) {
       test('forwards expansion only when enabled ($expansion)', () async {
         final projectDir = p.join(tempRoot.path, 'opt-in-$expansion');
@@ -1483,6 +1531,198 @@ Created AI model manifest scaffold: C:\\FH Radio Studio\\models\\ai_tools_manife
           expansion,
         );
       });
+    }
+
+    test(
+      'pending baseline rebuild forwards saved partial free-roam TD',
+      () async {
+        final projectDir = p.join(tempRoot.path, 'pending-roam-partial');
+        final paths = _writeIntegrityFixture(
+          projectDir,
+          deployedBytes: 'steam update',
+          pendingBaselineBytes: 'steam update',
+        );
+        final free = File(
+          p.join(FhRadioStudioProject.sourcesDir(projectDir), 'free.wav'),
+        )..createSync(recursive: true);
+        final race = File(
+          p.join(FhRadioStudioProject.sourcesDir(projectDir), 'race.wav'),
+        )..createSync(recursive: true);
+        _upsertTrackMetadata(projectDir, free.path);
+        _upsertTrackMetadata(projectDir, race.path);
+        _completeBuildTimingFixture(projectDir, race.path);
+        TrackTimingStore.save(
+          projectDir,
+          TrackTimingConfig(
+            source: free.path,
+            bpm: 123,
+            bpmManual: true,
+            markersSec: const {'TrackDrop': 3.125},
+            confirmed: const {
+              'td': true,
+              'pd': false,
+              'tl': false,
+              'pl': false,
+            },
+            updatedAt: DateTime.utc(2026, 10, 24),
+          ),
+        );
+        final manifestFile = File(
+          p.join(
+            paths.packageRoot,
+            'package',
+            'fh_radio_studio_package_manifest.json',
+          ),
+        );
+        final manifest =
+            jsonDecode(manifestFile.readAsStringSync(encoding: utf8))
+                as Map<String, dynamic>;
+        final radio =
+            (manifest['radios'] as List).single as Map<String, dynamic>;
+        radio['music'] = [
+          {'source': free.path, 'display_name': 'Free song'},
+          {'source': race.path, 'display_name': 'Race song'},
+        ];
+        radio['assignments'] = [
+          {
+            'source_index': 0,
+            'slot_index': 0,
+            'playlist_entry': true,
+            'playlist_types': ['FreeRoam'],
+            'playlist_slots': {'FreeRoam': 1},
+          },
+          {
+            'source_index': 1,
+            'slot_index': 1,
+            'playlist_entry': true,
+            'playlist_types': ['Event'],
+            'playlist_slots': {'Event': 1},
+          },
+        ];
+        manifestFile.writeAsStringSync(jsonEncode(manifest), encoding: utf8);
+        SharedPreferences.setMockInitialValues({_projectDirKey: projectDir});
+        final runtime = _testUvRuntime(
+          tempRoot,
+          'pending-roam-partial-runtime',
+        );
+        final cli = _RecordingCli(runtime);
+        final controller = _RecordingCliStudioController(
+          await SharedPreferences.getInstance(),
+          cli,
+        );
+        addTearDown(controller.dispose);
+        controller.setStateForTest(
+          controller.state.copyWith(repoRoot: runtime.projectRoot),
+        );
+
+        expect(
+          await controller.createPendingBaselineAndBuildPackage(),
+          isTrue,
+          reason: controller.state.log.join('\n'),
+        );
+        final command = cli.commands.singleWhere(
+          (args) => args.first == 'build-package',
+        );
+        expect(command, contains('--playlist-from-package'));
+        final timingIndex = command.indexOf('--timing-manifest');
+        expect(timingIndex, greaterThanOrEqualTo(0));
+        final sent =
+            jsonDecode(
+                  File(
+                    command[timingIndex + 1],
+                  ).readAsStringSync(encoding: utf8),
+                )
+                as Map<String, dynamic>;
+        final rows = (sent['tracks'] as List).cast<Map<String, dynamic>>();
+        expect(rows, hasLength(2));
+        final freeTiming = rows.singleWhere(
+          (row) =>
+              row['track_key'] == trackKeyForProjectPath(projectDir, free.path),
+        );
+        expect(freeTiming['markers_sec'], {'TrackDrop': 3.125});
+        expect(freeTiming['bpm'], 123);
+        expect(freeTiming['bpm_manual'], isTrue);
+        expect(freeTiming['confirmed'], {
+          'td': true,
+          'pd': false,
+          'tl': false,
+          'pl': false,
+        });
+        expect(
+          TrackTimingStore.readAll(
+            projectDir,
+          )[TrackTimingConfig.keyForPath(free.path)]!.allConfirmed,
+          isFalse,
+        );
+      },
+    );
+
+    for (final addRaceUse in [false, true]) {
+      test(
+        'build permits only free-roam missing timings: race=$addRaceUse',
+        () async {
+          final projectDir = p.join(
+            tempRoot.path,
+            'roam-requirements-$addRaceUse',
+          );
+          _writeIntegrityFixture(projectDir, deployedBytes: 'original');
+          final free = File(
+            p.join(FhRadioStudioProject.sourcesDir(projectDir), 'free.wav'),
+          )..createSync(recursive: true);
+          final race = File(
+            p.join(FhRadioStudioProject.sourcesDir(projectDir), 'race.wav'),
+          )..createSync(recursive: true);
+          var plan = const PlaylistPlan.empty()
+              .assign(
+                source: free.path,
+                radioCode: 'R4',
+                playlistType: 'FreeRoam',
+                slot: 1,
+              )
+              .assign(
+                source: race.path,
+                radioCode: 'R4',
+                playlistType: 'Event',
+                slot: 1,
+              );
+          if (addRaceUse) {
+            plan = plan.assign(
+              source: free.path,
+              radioCode: 'R4',
+              playlistType: 'Event',
+              slot: 2,
+            );
+          }
+          _writeLegacyPlaylistPlan(projectDir, plan);
+          final timings = TrackTimingStore.readAll(projectDir)
+            ..remove(TrackTimingConfig.keyForPath(free.path));
+          TrackTimingStore.writeAll(projectDir, timings);
+          SharedPreferences.setMockInitialValues({_projectDirKey: projectDir});
+          final runtime = _testUvRuntime(
+            tempRoot,
+            'roam-requirements-runtime-$addRaceUse',
+          );
+          final cli = _RecordingCli(runtime);
+          final controller = _RecordingCliStudioController(
+            await SharedPreferences.getInstance(),
+            cli,
+          );
+          addTearDown(controller.dispose);
+          controller.setStateForTest(
+            controller.state.copyWith(repoRoot: runtime.projectRoot),
+          );
+          expect(
+            await controller.buildPackage(
+              plan: PlaylistPlanStore.read(projectDir),
+            ),
+            !addRaceUse,
+          );
+          expect(
+            cli.commands.where((args) => args.first == 'build-package'),
+            addRaceUse ? isEmpty : hasLength(1),
+          );
+        },
+      );
     }
 
     test(
@@ -2077,6 +2317,9 @@ class _RecordingCli extends FhRadioStudioCli {
   int syncCount = 0;
   bool holdBuildUntilCancelled = false;
   CliCancellationToken? buildToken;
+
+  @override
+  Future<bool> isGameRunning() async => false;
 
   /// stdin payload the controller piped into the first invocation of [command].
   String? stdinForCommand(String command) {

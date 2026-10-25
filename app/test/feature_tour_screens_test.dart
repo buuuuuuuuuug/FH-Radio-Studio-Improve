@@ -2,10 +2,12 @@ import 'package:fh_radio_studio/domain/radio_library.dart';
 import 'package:fh_radio_studio/screens/custom_pool.dart';
 import 'package:fh_radio_studio/screens/dashboard.dart';
 import 'package:fh_radio_studio/screens/playlist.dart';
+import 'package:fh_radio_studio/screens/playlist/playlist_state.dart';
 import 'package:fh_radio_studio/screens/project_picker.dart';
 import 'package:fh_radio_studio/screens/replace_editor/replace_editor.dart';
 import 'package:fh_radio_studio/screens/replace_editor/replace_state.dart';
 import 'package:fh_radio_studio/state/app_state.dart';
+import 'package:fh_radio_studio/state/editor_options.dart';
 import 'package:fh_radio_studio/state/playlist_catalog_state.dart';
 import 'package:fh_radio_studio/state/studio_state.dart';
 import 'package:fh_radio_studio/tweaks/tweaks_panel.dart';
@@ -25,8 +27,12 @@ class _GuideStudio extends StudioController {
   Future<void> startupFullCheckOnce() async {}
 }
 
-Future<ProviderContainer> setup(WidgetTester t, Widget screen) async {
-  t.view.physicalSize = const Size(1440, 1000);
+Future<ProviderContainer> setup(
+  WidgetTester t,
+  Widget screen, {
+  double width = 1440,
+}) async {
+  t.view.physicalSize = Size(width, 1000);
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.resetPhysicalSize);
   addTearDown(t.view.resetDevicePixelRatio);
@@ -51,6 +57,7 @@ Future<ProviderContainer> setup(WidgetTester t, Widget screen) async {
     ],
   );
   addTearDown(container.dispose);
+  container.read(editorOptionsProvider.notifier).update(expansionEnabled: true);
   await t.pumpWidget(
     UncontrolledProviderScope(container: container, child: helpers.app(screen)),
   );
@@ -58,7 +65,11 @@ Future<ProviderContainer> setup(WidgetTester t, Widget screen) async {
   return container;
 }
 
-Future<void> checkSteps(WidgetTester t, List<String> titles) async {
+Future<void> checkSteps(
+  WidgetTester t,
+  List<String> titles, {
+  Map<String, String> anchors = const {},
+}) async {
   for (var i = 0; i < titles.length; i++) {
     expect(
       find.byWidgetPredicate(
@@ -76,6 +87,25 @@ Future<void> checkSteps(WidgetTester t, List<String> titles) async {
                 .painter
             as dynamic;
     expect(painter.rect, isNotNull, reason: 'Missing target: ${titles[i]}');
+    final anchor = anchors[titles[i]];
+    if (anchor != null) {
+      final target = find.byWidgetPredicate(
+        (widget) => widget is TourAnchor && widget.id == anchor,
+      );
+      expect(target, findsOneWidget);
+      final expected = t.getRect(target).inflate(5);
+      final actual = painter.rect as Rect;
+      expect(
+        (actual.topLeft - expected.topLeft).distance,
+        lessThan(1),
+        reason: 'Incorrect target for ${titles[i]}',
+      );
+      expect(
+        (actual.bottomRight - expected.bottomRight).distance,
+        lessThan(1),
+        reason: 'Target includes other settings: ${titles[i]}',
+      );
+    }
     await t.tap(find.text(i == titles.length - 1 ? '知道了' : '下一步'));
     await t.pumpAndSettle();
     expect(t.takeException(), isNull);
@@ -92,13 +122,54 @@ void main() {
     await checkSteps(t, ['从工程开始', '边用边了解']);
     expect(find.text('新建工程'), findsOneWidget);
   });
-  testWidgets(
-    'basics highlights game, analysis and workflow on the real page',
-    (t) async {
-      await setup(t, const DashboardScreen());
-      await checkSteps(t, ['游戏与语言', '分析与循环', '同步循环', '电台扩容', '检查与写入']);
-    },
-  );
+  for (final width in [1440.0, 960.0]) {
+    testWidgets(
+      'basics introduces each setting with its own highlight at width $width',
+      (t) async {
+        final container = await setup(t, const DashboardScreen(), width: width);
+        expect(
+          find.byKey(const ValueKey('split-playlist-setting')),
+          findsOneWidget,
+        );
+        expect(find.text('还原默认'), findsNothing);
+        await checkSteps(
+          t,
+          [
+            '游戏与语言',
+            '分析模式',
+            '同步循环',
+            '电台扩容',
+            'SeamlessLoopMusic',
+            '分场景编辑',
+            '检查与写入',
+          ],
+          anchors: {
+            '游戏与语言': 'game',
+            '分析模式': 'analysis',
+            '同步循环': 'sync',
+            '电台扩容': 'expansion',
+            'SeamlessLoopMusic': 'seamless',
+            '分场景编辑': 'split',
+          },
+        );
+        final splitSwitch = find.descendant(
+          of: find.byKey(const ValueKey('split-playlist-setting')),
+          matching: find.byType(Switch),
+        );
+        expect(t.widget<Switch>(splitSwitch).value, isFalse);
+        await Scrollable.ensureVisible(t.element(splitSwitch), alignment: .5);
+        await t.pumpAndSettle();
+        await t.tap(splitSwitch);
+        await t.pumpAndSettle();
+        expect(find.text('分开编辑漫游和比赛？'), findsOneWidget);
+        await t.tap(find.text('打开'));
+        await t.pumpAndSettle();
+        expect(container.read(playlistProvider).splitPlaylistTypes, isTrue);
+        expect(t.widget<Switch>(splitSwitch).value, isTrue);
+        expect(t.takeException(), isNull);
+      },
+    );
+  }
   testWidgets('library introduces import, browse and songs on the real page', (
     t,
   ) async {
@@ -109,7 +180,7 @@ void main() {
     t,
   ) async {
     await setup(t, const PlaylistScreen());
-    await checkSteps(t, ['查看与编辑', '搜索歌曲', '电台列数与高度', '安排电台', '保存与构建']);
+    await checkSteps(t, ['查看与编辑', '分场景编辑', '搜索歌曲', '电台列数与高度', '安排电台', '保存与构建']);
   });
   for (final embedded in [false, true]) {
     testWidgets(

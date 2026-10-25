@@ -26,6 +26,7 @@ import 'package:go_router/go_router.dart';
 import 'package:media_kit/media_kit.dart';
 
 import '../core/playlist_plan.dart';
+import 'playlist/playlist_state.dart';
 import '../core/song_browse.dart';
 import '../widgets/song_browse_controls.dart';
 import '../core/studio_audio_players.dart';
@@ -272,17 +273,22 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
     final sirenImport = ref.watch(sirenImportQueueProvider);
     final sirenImporting = sirenImport.importing || cli.busyLabel == '导入塞壬唱片';
     final playlistPlan = ref.watch(effectivePlaylistPlanProvider);
+    final splitTypes = ref.watch(
+      playlistProvider.select((state) => state.splitPlaylistTypes),
+    );
     final membership = ref.watch(gamePlaylistMembershipProvider).asData?.value;
     final gameAssignmentPlan = membership?.plan ?? const PlaylistPlan.empty();
     final gameAssignmentsKnown = membership != null;
     final latestPackage = cli.pendingPackageSummary ?? cli.lastPackageSummary;
-    final configured = all.where((t) => t.configured).toList();
-    final unconfigured = all.where((t) => !t.configured).toList();
+    final configured = all.where((t) => t.readyForBuild).toList();
+    final unconfigured = all.where((t) => !t.readyForBuild).toList();
     final unassigned = all.where((t) => t.assignedTo == null).toList();
     final msrTracks = all.where((t) => t.isSiren).toList();
     final panelTracks = _msrOnly ? msrTracks : all;
-    final panelConfigured = panelTracks.where((t) => t.configured).toList();
-    final panelUnconfigured = panelTracks.where((t) => !t.configured).toList();
+    final panelConfigured = panelTracks.where((t) => t.readyForBuild).toList();
+    final panelUnconfigured = panelTracks
+        .where((t) => !t.readyForBuild)
+        .toList();
     final possibleDuplicates = duplicateSongs(all);
     final visible = browseSongs(
       _sortForEditing(switch (_filter) {
@@ -292,6 +298,8 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
       }),
       _browse,
       duplicates: possibleDuplicates,
+      plan: playlistPlan,
+      splitTypes: splitTypes,
     );
     final customRadios = kRadios
         .where((r) => kStationModes[r.code] == StationMode.custom)
@@ -390,6 +398,7 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
                                 msrCount: msrTracks.length,
                                 latestPackage: latestPackage,
                                 playlistPlan: playlistPlan,
+                                splitTypes: splitTypes,
                                 gameAssignmentPlan: gameAssignmentPlan,
                                 uncertainGameSources:
                                     membership?.uncertainSources ?? const {},
@@ -446,7 +455,10 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
       children: [
         Text('自建歌曲', style: RmText.pageH1(color: rm.fg)),
         const SizedBox(height: 6),
-        Text('配置并确认 6 个时间点后，在「播放列表」中分配到电台。', style: RmText.body(color: rm.fg3)),
+        Text(
+          '先分配歌曲：仅漫游可直接使用；用于比赛时需确认四组时间点。',
+          style: RmText.body(color: rm.fg3),
+        ),
       ],
     );
   }
@@ -637,7 +649,7 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
               StatCard(
                 label: '已配置 · 可用',
                 value: '$configured  /  $total',
-                delta: '6 个时间点全部确认',
+                delta: '比赛已配置 / 仅漫游可用',
               ),
             ),
             cell(
@@ -667,6 +679,7 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
     required int msrCount,
     required PackageArtifactSummary? latestPackage,
     required PlaylistPlan playlistPlan,
+    required bool splitTypes,
     required PlaylistPlan gameAssignmentPlan,
     required Set<String> uncertainGameSources,
     required bool gameAssignmentsKnown,
@@ -759,6 +772,7 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
               children: [
                 SongBrowseControls(
                   value: _browse,
+                  showScene: splitTypes,
                   onChanged: (v) => setState(() {
                     if (v.filter != _browse.filter) _filter = _PoolFilter.all;
                     _browse = v;
@@ -777,6 +791,7 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
               cli,
               msrOnly: _msrOnly,
               sirenImporting: sirenImporting,
+              filtered: totalCount > 0,
             ),
           )
         else
@@ -814,40 +829,65 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
     StudioState cli, {
     required bool msrOnly,
     required bool sirenImporting,
+    bool filtered = false,
   }) {
     final rm = context.rm;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 80),
       child: Column(
         children: [
-          Text('这里空空的', style: RmText.emptyTitle(color: rm.fg)),
+          Text(
+            filtered ? '没有符合筛选的歌曲' : '这里空空的',
+            style: RmText.emptyTitle(color: rm.fg),
+          ),
           const SizedBox(height: 6),
           Text(
-            msrOnly ? '从塞壬唱片导入歌曲后会显示在这里' : '导入 .mp3 / .flac / .wav 开始构建你的池子',
+            filtered
+                ? '切换为全部场景，或调整搜索、状态和电台筛选。'
+                : msrOnly
+                ? '从塞壬唱片导入歌曲后会显示在这里'
+                : '导入 .mp3 / .flac / .wav 开始构建你的池子',
             style: RmText.body(color: rm.fg3),
           ),
           const SizedBox(height: 16),
-          RmButton(
-            onPressed:
-                cli.busy ||
-                    (msrOnly &&
-                        !ref.watch(editorOptionsProvider).sirenEnabled) ||
-                    (!msrOnly && sirenImporting)
-                ? null
-                : (msrOnly
-                      ? () => context.go(RmRoutes.siren)
-                      : _pickMusicFiles),
-            variant: RmButtonVariant.primary,
-            leading: msrOnly && sirenImporting
-                ? const _ButtonSpinner()
-                : RmIcon(msrOnly ? 'spark' : 'import', size: 12),
-            label: msrOnly && sirenImporting
-                ? '塞壬导入中'
-                : msrOnly
-                ? '前往 MSR'
-                : '导入曲目',
-            tooltip: !msrOnly && sirenImporting ? '塞壬唱片正在导入，完成后可导入本地歌曲' : null,
-          ),
+          if (filtered)
+            RmButton(
+              label: '清除筛选',
+              onPressed: () => setState(() {
+                _filter = _PoolFilter.all;
+                _browse = _browse.copyWith(
+                  search: '',
+                  filter: SongFilter.all,
+                  station: '',
+                  scene: SongSceneFilter.all,
+                );
+                _poolBrowse[cli.projectDir] = _browse;
+              }),
+            )
+          else
+            RmButton(
+              onPressed:
+                  cli.busy ||
+                      (msrOnly &&
+                          !ref.watch(editorOptionsProvider).sirenEnabled) ||
+                      (!msrOnly && sirenImporting)
+                  ? null
+                  : (msrOnly
+                        ? () => context.go(RmRoutes.siren)
+                        : _pickMusicFiles),
+              variant: RmButtonVariant.primary,
+              leading: msrOnly && sirenImporting
+                  ? const _ButtonSpinner()
+                  : RmIcon(msrOnly ? 'spark' : 'import', size: 12),
+              label: msrOnly && sirenImporting
+                  ? '塞壬导入中'
+                  : msrOnly
+                  ? '前往 MSR'
+                  : '导入曲目',
+              tooltip: !msrOnly && sirenImporting
+                  ? '塞壬唱片正在导入，完成后可导入本地歌曲'
+                  : null,
+            ),
         ],
       ),
     );
@@ -1321,13 +1361,17 @@ class _PoolRowState extends ConsumerState<_PoolRow> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          ProgressBars(value: t.confirmed),
+                          if (!t.freeRoamOnly) ProgressBars(value: t.confirmed),
                           const SizedBox(height: 4),
                           Text(
-                            t.configured ? '已配置' : '${t.confirmed}/4',
+                            t.freeRoamOnly
+                                ? '漫游可用'
+                                : t.configured
+                                ? '已配置'
+                                : '${t.confirmed}/4',
                             style: RmText.mono(
                               10.5,
-                              color: t.configured ? rm.accent.base : rm.fg3,
+                              color: t.readyForBuild ? rm.accent.base : rm.fg3,
                             ),
                           ),
                         ],
@@ -1416,7 +1460,7 @@ class _PoolRowState extends ConsumerState<_PoolRow> {
                           RmButton(
                             onPressed: widget.onTap,
                             size: RmButtonSize.sm,
-                            label: t.configured ? '查看' : '配置',
+                            label: t.readyForBuild ? '查看' : '配置',
                           ),
                           const SizedBox(width: 4),
                           RmButton.icon(

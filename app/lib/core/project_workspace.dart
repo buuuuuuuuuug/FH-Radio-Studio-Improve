@@ -169,6 +169,7 @@ class FhRadioStudioProject {
     bool? manualOnly,
     bool? sirenEnabled,
     bool? expansionEnabled,
+    bool? splitPlaylistTypes,
     bool? lastBuildExpansionEnabled,
     bool? slmEnabled,
   }) {
@@ -194,6 +195,9 @@ class FhRadioStudioProject {
     if (sirenEnabled != null) settings['siren_enabled'] = sirenEnabled;
     if (expansionEnabled != null) {
       settings['expansion_enabled'] = expansionEnabled;
+    }
+    if (splitPlaylistTypes != null) {
+      settings['split_playlist_types'] = splitPlaylistTypes;
     }
     if (lastBuildExpansionEnabled != null) {
       settings['last_build_expansion_enabled'] = lastBuildExpansionEnabled;

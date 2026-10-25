@@ -47,10 +47,7 @@ class PlaylistPlanController extends StateNotifier<PlaylistPlan> {
       (plan: state, userPlan: hasUserPlan);
   void _restore(({PlaylistPlan plan, bool userPlan}) entry) {
     hasUserPlan = entry.userPlan;
-    state = PlaylistPlan(
-      assignments: {...entry.plan.assignments},
-      builtinTargets: {...entry.plan.builtinTargets},
-    );
+    state = entry.plan.copyWith();
   }
 
   void undo() {
@@ -78,7 +75,7 @@ class PlaylistPlanController extends StateNotifier<PlaylistPlan> {
     } finally {
       _transactionDepth--;
       if (_transactionDepth == 0 &&
-          (before.plan.encodeForCli() != state.encodeForCli() ||
+          (before.plan.encodeForStorage() != state.encodeForStorage() ||
               before.userPlan != hasUserPlan)) {
         _undo.add(before);
         if (_undo.length > 100) _undo.removeAt(0);
@@ -105,7 +102,8 @@ class PlaylistPlanController extends StateNotifier<PlaylistPlan> {
   }
 
   bool get dirty =>
-      hasUserPlan != _savedUserPlan || state.encodeForCli() != _savedSignature;
+      hasUserPlan != _savedUserPlan ||
+      state.encodeForStorage() != _savedSignature;
 
   void _resetDraft() {
     _undo.clear();
@@ -121,7 +119,7 @@ class PlaylistPlanController extends StateNotifier<PlaylistPlan> {
     }
     _saved = state;
     _savedUserPlan = hasUserPlan;
-    _savedSignature = state.encodeForCli();
+    _savedSignature = state.encodeForStorage();
   }
 
   void reload() => _resetDraft();
@@ -130,10 +128,9 @@ class PlaylistPlanController extends StateNotifier<PlaylistPlan> {
   void replaceWith(PlaylistPlan plan) {
     if (_editingLocked) return;
     _apply(
-      PlaylistPlan(
-        assignments: {...plan.assignments},
-        builtinTargets: {...plan.builtinTargets},
-      ),
+      plan.splitPlaylistTypes != null || plan.splitSnapshot != null
+          ? plan.copyWith()
+          : plan.withSceneStateFrom(state),
     );
   }
 
@@ -144,11 +141,8 @@ class PlaylistPlanController extends StateNotifier<PlaylistPlan> {
     hasUserPlan = true;
     _savedUserPlan = true;
     _saved = plan;
-    _savedSignature = plan.encodeForCli();
-    state = PlaylistPlan(
-      assignments: {...plan.assignments},
-      builtinTargets: {...plan.builtinTargets},
-    );
+    _savedSignature = plan.encodeForStorage();
+    state = plan.copyWith();
   }
 
   String? _discardBlockedReason() {
@@ -166,10 +160,7 @@ class PlaylistPlanController extends StateNotifier<PlaylistPlan> {
     _undo.clear();
     _redo.clear();
     hasUserPlan = _savedUserPlan;
-    state = PlaylistPlan(
-      assignments: {..._saved.assignments},
-      builtinTargets: {..._saved.builtinTargets},
-    );
+    state = _saved.copyWith();
   }
 
   void assign({
@@ -201,11 +192,7 @@ class PlaylistPlanController extends StateNotifier<PlaylistPlan> {
   }
 
   void removeDeletedSource(String source) {
-    _undo.clear();
-    _redo.clear();
-    final base = _stateSeededFromPackage();
-    hasUserPlan = true;
-    state = base.unassign(source, projectDir: _projectDir);
+    removeDeletedSources([source]);
   }
 
   void removeDeletedSources(Iterable<String> sources) {
@@ -213,7 +200,10 @@ class PlaylistPlanController extends StateNotifier<PlaylistPlan> {
     _redo.clear();
     final base = _stateSeededFromPackage();
     hasUserPlan = true;
-    state = base.unassignSources(sources, projectDir: _projectDir);
+    final deleted = sources.toList();
+    state = base.removeDeletedSourcesEverywhere(deleted);
+    _saved = _saved.removeDeletedSourcesEverywhere(deleted);
+    _savedSignature = _saved.encodeForStorage();
   }
 
   void restoreBuiltin({
@@ -290,7 +280,7 @@ PlaylistPlan playlistPlanFromPackageSummaries({
         source: item.source,
         radioCode: radioCode,
         playlistType: playlistType,
-        slot: item.slot,
+        slot: item.slotForPlaylist(playlistType),
       );
       if (!assignment.isValid || !assignment.isAssigned) continue;
       assignments[assignment.assignmentKey] = assignment;

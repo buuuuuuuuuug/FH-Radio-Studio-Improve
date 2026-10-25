@@ -7,7 +7,9 @@ import 'rm_button.dart';
 import 'rm_icon.dart';
 import 'rm_field.dart';
 
-class SongBrowseControls extends StatelessWidget {
+const songBrowseActionWidth = 84.0;
+
+class SongBrowseControls extends StatefulWidget {
   const SongBrowseControls({
     super.key,
     required this.value,
@@ -15,10 +17,43 @@ class SongBrowseControls extends StatelessWidget {
     this.compact = false,
     this.showStatus = true,
     this.showSearch = true,
+    this.showScene = false,
   });
   final SongBrowse value;
   final ValueChanged<SongBrowse> onChanged;
-  final bool compact, showStatus, showSearch;
+  final bool compact, showStatus, showSearch, showScene;
+
+  @override
+  State<SongBrowseControls> createState() => _SongBrowseControlsState();
+}
+
+class _SongBrowseControlsState extends State<SongBrowseControls> {
+  late final TextEditingController _search = TextEditingController(
+    text: widget.value.search,
+  );
+  SongBrowse get value => widget.value;
+  ValueChanged<SongBrowse> get onChanged => widget.onChanged;
+  bool get compact => widget.compact;
+  bool get showStatus => widget.showStatus;
+  bool get showSearch => widget.showSearch;
+
+  @override
+  void didUpdateWidget(covariant SongBrowseControls oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value.search != value.search &&
+        _search.text != value.search) {
+      _search.value = TextEditingValue(
+        text: value.search,
+        selection: TextSelection.collapsed(offset: value.search.length),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
 
   Widget _select<T>(
     BuildContext context,
@@ -32,7 +67,7 @@ class SongBrowseControls extends StatelessWidget {
       message: '$tooltip：${items.firstWhere((item) => item.$1 == current).$2}',
       child: Container(
         height: 32,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 10),
         decoration: BoxDecoration(
           color: rm.raised,
           border: Border.all(color: rm.border),
@@ -70,15 +105,36 @@ class SongBrowseControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rm = context.rm;
+    final scene = SizedBox(
+      width: songBrowseActionWidth,
+      child: RmButton(
+        key: const ValueKey('song-scene-filter'),
+        label: switch (value.scene) {
+          SongSceneFilter.all => '全部',
+          SongSceneFilter.freeRoam => '漫游',
+          SongSceneFilter.event => '比赛',
+        },
+        leading: const Icon(Icons.swap_horiz, size: 12),
+        tooltip: '按准备包分配筛选：全部 → 漫游 → 比赛；点击切换',
+        onPressed: () => onChanged(
+          value.copyWith(
+            scene:
+                SongSceneFilter.values[(value.scene.index + 1) %
+                    SongSceneFilter.values.length],
+          ),
+        ),
+      ),
+    );
     final sort = _select(
       context,
-      value.sort == SongSort.artist
-          ? SongSort.editor
+      value.sort == SongSort.editor
+          ? SongSort.artist
           : value.sort == SongSort.modifiedNewest
           ? SongSort.modifiedOldest
           : value.sort,
       const [
-        (SongSort.editor, '编辑器顺序（默认按歌手）'),
+        (SongSort.filename, '文件名称'),
+        (SongSort.artist, '歌手名称'),
         (SongSort.title, '歌曲名称'),
         (SongSort.modifiedOldest, '修改日期'),
       ],
@@ -103,7 +159,7 @@ class SongBrowseControls extends StatelessWidget {
             f,
             switch (f) {
               SongFilter.all => '全部状态',
-              SongFilter.configured => '已配置',
+              SongFilter.configured => '已就绪',
               SongFilter.unconfigured => '待配置',
               SongFilter.assigned => '已分配',
               SongFilter.unassigned => '未分配',
@@ -123,94 +179,145 @@ class SongBrowseControls extends StatelessWidget {
     );
     final search = SizedBox(
       height: 32,
-      child: TextFormField(
-        initialValue: value.search,
+      child: TextField(
+        key: const ValueKey('song-browse-search'),
+        controller: _search,
         style: RmText.sans(12, color: rm.fg),
         cursorColor: rm.accent.base,
-        decoration: rmFieldDecoration(
-          context,
-          hint: '搜索歌曲 / 歌手 / 文件名',
-          prefix: Icon(Icons.search, size: 14, color: rm.fg3),
-        ),
-        onChanged: (v) => onChanged(value.copyWith(search: v)),
+        decoration:
+            rmFieldDecoration(
+              context,
+              hint: '搜索歌曲 / 歌手 / 文件名',
+              prefix: Icon(Icons.search, size: 14, color: rm.fg3),
+            ).copyWith(
+              suffixIconConstraints: const BoxConstraints.tightFor(
+                width: 30,
+                height: 30,
+              ),
+              suffixIcon: _search.text.isEmpty
+                  ? null
+                  : IconButton(
+                      key: const ValueKey('song-browse-clear-search'),
+                      tooltip: '清空搜索',
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 30,
+                        height: 30,
+                      ),
+                      icon: Icon(Icons.close, size: 14, color: rm.fg3),
+                      onPressed: () {
+                        _search.clear();
+                        setState(() {});
+                        onChanged(value.copyWith(search: ''));
+                      },
+                    ),
+            ),
+        onChanged: (v) {
+          setState(() {});
+          onChanged(value.copyWith(search: v));
+        },
       ),
     );
     return Padding(
       padding: compact
-          ? const EdgeInsets.fromLTRB(12, 4, 12, 6)
+          ? const EdgeInsets.fromLTRB(8, 4, 8, 6)
           : const EdgeInsets.all(12),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: compact
-            ? Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (showSearch) ...[search, const SizedBox(height: 4)],
-                  Row(
-                    children: [
-                      Expanded(child: sort),
-                      const SizedBox(width: 6),
-                      SizedBox(width: 84, child: direction),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      if (showStatus) ...[
-                        Expanded(child: filter),
-                        const SizedBox(width: 6),
-                      ],
-                      Expanded(child: station),
-                    ],
-                  ),
-                ],
-              )
-            : LayoutBuilder(
-                builder: (context, constraints) {
-                  if (constraints.maxWidth >= 700) {
-                    return Row(
-                      children: [
-                        if (showSearch) ...[
-                          Expanded(flex: 4, child: search),
-                          const SizedBox(width: 8),
-                        ],
-                        Expanded(flex: 3, child: sort),
-                        const SizedBox(width: 8),
-                        SizedBox(width: 84, child: direction),
-                        const SizedBox(width: 8),
-                        if (showStatus) ...[
-                          Expanded(flex: 2, child: filter),
-                          const SizedBox(width: 8),
-                        ],
-                        Expanded(flex: 2, child: station),
-                      ],
-                    );
-                  }
-                  return Column(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            compact
+                ? Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (showSearch) ...[search, const SizedBox(height: 8)],
+                      if (showSearch) ...[search, const SizedBox(height: 4)],
                       Row(
                         children: [
                           Expanded(child: sort),
-                          const SizedBox(width: 8),
-                          SizedBox(width: 84, child: direction),
+                          const SizedBox(width: 6),
+                          SizedBox(
+                            width: songBrowseActionWidth,
+                            child: direction,
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 4),
                       Row(
                         children: [
                           if (showStatus) ...[
                             Expanded(child: filter),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 6),
                           ],
                           Expanded(child: station),
+                          if (widget.showScene) ...[
+                            const SizedBox(width: 6),
+                            scene,
+                          ],
                         ],
                       ),
                     ],
-                  );
-                },
-              ),
+                  )
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      if (constraints.maxWidth >= 700) {
+                        return Row(
+                          children: [
+                            if (showSearch) ...[
+                              Expanded(flex: 4, child: search),
+                              const SizedBox(width: 8),
+                            ],
+                            Expanded(flex: 3, child: sort),
+                            const SizedBox(width: 8),
+                            SizedBox(width: 84, child: direction),
+                            if (widget.showScene) ...[
+                              const SizedBox(width: 8),
+                              scene,
+                            ],
+                            const SizedBox(width: 8),
+                            if (showStatus) ...[
+                              Expanded(flex: 2, child: filter),
+                              const SizedBox(width: 8),
+                            ],
+                            Expanded(flex: 2, child: station),
+                          ],
+                        );
+                      }
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (showSearch) ...[
+                            search,
+                            const SizedBox(height: 8),
+                          ],
+                          Row(
+                            children: [
+                              Expanded(child: sort),
+                              const SizedBox(width: 8),
+                              SizedBox(width: 84, child: direction),
+                              if (widget.showScene) ...[
+                                const SizedBox(width: 8),
+                                scene,
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              if (showStatus) ...[
+                                Expanded(child: filter),
+                                const SizedBox(width: 8),
+                              ],
+                              Expanded(child: station),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+          ],
+        ),
       ),
     );
   }

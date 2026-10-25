@@ -1403,6 +1403,35 @@ def load_playlist_plan_groups(
     return result
 
 
+def validate_split_builtin_targets(
+    plan_path: Optional[str], root: ET.Element, targets: List[Dict[str, object]]
+) -> None:
+    """A pristine and a custom scene cannot currently share one rebuilt bank."""
+    if not targets:
+        return
+    data = load_plan_document(plan_path)
+    items = data.get("assignments") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return
+    builtin_types = {
+        int(target["radio"]): set(target.get("playlist_types") or []) for target in targets
+    }
+    code_to_number = station_number_by_code(root)
+    for item in items:
+        if not isinstance(item, dict) or not (item.get("track_key") or item.get("source")):
+            continue
+        radio = _resolve_playlist_plan_radio(
+            str(item.get("radio_code") or "").strip().upper(), code_to_number
+        )
+        restored = builtin_types.get(radio, set())
+        kind = normalize_playlist_type(item.get("playlist_type") or "FreeRoam")
+        if restored and kind not in restored:
+            die(
+                f"R{radio} 的漫游与比赛共用同一个音频 bank，当前不支持一个场景原版、"
+                "另一个场景自建。请将两个场景都设为自建或都设为原版，再构建准备包。"
+            )
+
+
 def _package_manifest_path_from_arg(package_arg: str) -> Path:
     path = Path(package_arg).expanduser()
     if path.is_file():
@@ -1559,6 +1588,7 @@ def prepare_music_tracks(
     parallel_loudness: bool = True,
     precomputed_loudness_by_source: Optional[Dict[str, Dict[str, object]]] = None,
     slot_filename_width: Optional[int] = None,
+    playlist_types_by_source: Optional[Dict[str, List[str]]] = None,
 ) -> List[Dict[str, object]]:
     prepared_dir.mkdir(parents=True, exist_ok=True)
     envelope = loudness_envelope or ensure_baseline_loudness_envelope(
@@ -1640,7 +1670,13 @@ def prepare_music_tracks(
             project_dir=_project_dir_for_args(args),
         )
         bpm_value = bpm_from_override(override, args.bpm)
-        if _all_core_markers_overridden(override):
+        kinds = (playlist_types_by_source or {}).get(source_key(music), list(PLAYLIST_TYPES))
+        if set(kinds) == {"FreeRoam"}:
+            timing = free_roam_default_timing(
+                override, int(after["samples"]), int(after["sample_rate"])
+            )
+            sr = int(after["sample_rate"])
+        elif _all_core_markers_overridden(override):
             timing = {}
             sr = int(after["sample_rate"])
         else:
@@ -1690,6 +1726,135 @@ def prepare_music_tracks(
     return prepared_tracks
 
 
+def free_roam_default_timing(
+    override: Optional[Dict[str, object]], total_samples: int, sr: int
+) -> Dict[str, int]:
+    """Safe fallback points are package data, never a saved/confirmed user edit."""
+    if total_samples < 2 or sr <= 0:
+        die("漫游音频过短，无法生成有效的兼容循环点。")
+    end = total_samples - 1
+    midpoint = min(end - 1, total_samples // 2)
+    defaults = {
+        "TrackDrop": 0,
+        "PostDrop": midpoint,
+        "TrackLoopStart": 0,
+        "TrackLoopEnd": end,
+        "PostRaceLoopStart": midpoint,
+        "PostRaceLoopEnd": end,
+    }
+    saved = set()
+    for marker in CORE_TIMING_MARKERS:
+        value = marker_seconds_from_override(override, marker)
+        if value is None:
+            continue
+        if not math.isfinite(value) or value < 0 or value > total_samples / sr + 0.001:
+            die(f"漫游歌曲已保存的 {marker} 超出音频范围，请修改该点位或清除后重试。")
+        defaults[marker] = min(end, int(round(value * sr)))
+        saved.add(marker)
+    for start, stop in (
+        ("TrackLoopStart", "TrackLoopEnd"),
+        ("PostRaceLoopStart", "PostRaceLoopEnd"),
+    ):
+        if defaults[start] < defaults[stop]:
+            continue
+        if start not in saved and defaults[stop] > 0:
+            defaults[start] = min(defaults[start], defaults[stop] - 1)
+        elif stop not in saved and defaults[start] < end:
+            defaults[stop] = end
+        else:
+            die(f"漫游歌曲已保存的 {start}/{stop} 无法组成有效循环，请修改后重试。")
+    return defaults
+
+
+def validate_event_timing_overrides(
+    args: argparse.Namespace,
+    groups: List[Dict[str, object]],
+    timing_overrides: Dict[str, object],
+) -> None:
+    # Legacy CLI builds can still estimate points. Explicit app plans must never
+    # let a FreeRoam assignment exempt the same source's Event assignment.
+    if bool(getattr(args, "skip_bank", False)) or not (
+        getattr(args, "playlist_plan", None) or getattr(args, "playlist_from_package", None)
+    ):
+        return
+    event_sources = {}
+    for group in groups:
+        kinds_by_source = group.get("playlist_types_by_source") or {}
+        for source in group["sources"]:
+            if "Event" in kinds_by_source.get(source_key(source), list(PLAYLIST_TYPES)):
+                event_sources[source_key(source)] = source
+    project_dir = _project_dir_for_args(args)
+    for source in event_sources.values():
+        override = timing_override_for(timing_overrides, source, project_dir=project_dir)
+        confirmed = override.get("confirmed") if isinstance(override, dict) else None
+        values = {
+            name: marker_seconds_from_override(override, name) for name in CORE_TIMING_MARKERS
+        }
+        if (
+            not isinstance(confirmed, dict)
+            or not all(confirmed.get(group) is True for group in ("td", "tl", "pd", "pl"))
+            or any(
+                value is None or not math.isfinite(value) or value < 0 for value in values.values()
+            )
+            or values["TrackLoopStart"] >= values["TrackLoopEnd"]
+            or values["PostRaceLoopStart"] >= values["PostRaceLoopEnd"]
+        ):
+            die(
+                f"{source.name} 已分配到比赛场景，需要配置六个时间点并确认 TD、TL、PD、PL 后再构建。"
+            )
+        duration = read_track_metadata(source).duration_sec
+        if duration <= 0 or any(value > duration + 0.001 for value in values.values()):
+            die(f"{source.name} 的比赛时间点超出音频时长，请修改并重新确认后再构建。")
+
+
+def validate_shared_bank_capacity(
+    radio: int,
+    music_files: List[Path],
+    playlist_types_by_source: Optional[Dict[str, List[str]]],
+    bank_slots: int,
+    expanding: bool,
+) -> None:
+    """Never truncate away an independently assigned scene from a shared bank."""
+    if expanding or len(music_files) <= bank_slots or not playlist_types_by_source:
+        return
+    scene_sources = {kind: set() for kind in PLAYLIST_TYPES}
+    for source in music_files:
+        for kind in playlist_types_by_source.get(source_key(source), list(PLAYLIST_TYPES)):
+            if kind in scene_sources:
+                scene_sources[kind].add(source_key(source))
+    free, event = scene_sources["FreeRoam"], scene_sources["Event"]
+    if free and event and free != event:
+        die(
+            f"R{radio} 漫游 {len(free)} 首、比赛 {len(event)} 首，两种场景共用一个 bank；"
+            f"合计需要 {len(music_files)} 个不同歌曲槽位，原版 bank 只有 {bank_slots} 个 slots。"
+            "请启用电台扩容，或减少两个场景合计的不同歌曲；不能截断其中一个场景。"
+        )
+
+
+def validate_custom_scene_pair(
+    radio: int,
+    music_files: List[Path],
+    playlist_types_by_source: Optional[Dict[str, List[str]]],
+    *,
+    skip_bank: bool,
+) -> None:
+    # Keeping baseline XML entries does not keep baseline audio: the same
+    # SoundName resolves through the bank that is about to be rebuilt.
+    if skip_bank or not playlist_types_by_source:
+        return
+    active = {
+        kind
+        for source in music_files
+        for kind in playlist_types_by_source.get(source_key(source), list(PLAYLIST_TYPES))
+        if kind in PLAYLIST_TYPES
+    }
+    if active and active != set(PLAYLIST_TYPES):
+        die(
+            f"R{radio} 的漫游与比赛共用同一个音频库，当前不支持只替换一个场景、"
+            "另一个场景保留原版。请为漫游和比赛都安排自建歌曲，再构建准备包。"
+        )
+
+
 def build_radio_package_unit(
     args: argparse.Namespace,
     game_dir: Path,
@@ -1723,6 +1888,15 @@ def build_radio_package_unit(
     )
 
     expanding = bool(getattr(args, "expand_slots", False))
+    validate_custom_scene_pair(
+        radio,
+        music_files,
+        playlist_types_by_source,
+        skip_bank=bool(getattr(args, "skip_bank", False)),
+    )
+    validate_shared_bank_capacity(
+        radio, music_files, playlist_types_by_source, bank_info.num_samples, expanding
+    )
     if expanding and len(music_files) > FSB5_MAX_SAMPLES:
         die(f"Expansion build currently supports at most {FSB5_MAX_SAMPLES} tracks per bank")
     if len(music_files) > bank_info.num_samples and not args.allow_truncate and not expanding:
@@ -1766,6 +1940,7 @@ def build_radio_package_unit(
             parallel_loudness=precomputed_loudness_by_source is None,
             precomputed_loudness_by_source=precomputed_loudness_by_source,
             slot_filename_width=width,
+            playlist_types_by_source=playlist_types_by_source,
         )
 
     if expanding:
@@ -1959,6 +2134,19 @@ def preflight_build_package_from_plan(
         playlist_caps = playlist_entry_caps(station)
         music_files = list(group["sources"])
         expanding = bool(getattr(args, "expand_slots", False))
+        validate_custom_scene_pair(
+            radio,
+            music_files,
+            group.get("playlist_types_by_source"),
+            skip_bank=bool(getattr(args, "skip_bank", False)),
+        )
+        validate_shared_bank_capacity(
+            radio,
+            music_files,
+            group.get("playlist_types_by_source"),
+            bank_info.num_samples,
+            expanding,
+        )
         if expanding and len(music_files) > FSB5_MAX_SAMPLES:
             die(f"R{radio} exceeds the experimental {FSB5_MAX_SAMPLES}-track build limit")
         if len(music_files) > bank_info.num_samples and not args.allow_truncate and not expanding:
@@ -2658,13 +2846,13 @@ def cmd_build_package_from_plan(
                 "Restoring builtin playlist targets requires --source-audio-dir "
                 "pointing at the pristine baseline media/audio directory."
             )
-    with progress.stage("inspect_inputs"):
-        preflight_build_package_from_plan(args, game_dir, audio_dir, root, groups)
-
     timing_overrides = load_timing_overrides(
         args.timing_manifest,
         project_dir=_project_dir_for_args(args),
     )
+    with progress.stage("inspect_inputs"):
+        preflight_build_package_from_plan(args, game_dir, audio_dir, root, groups)
+        validate_event_timing_overrides(args, groups, timing_overrides)
     out_dir = Path(args.out_dir).expanduser()
     prepared_dir = out_dir / "work" / "prepared"
     stage_root = out_dir / "work" / "fsbank_stage"
@@ -2900,6 +3088,7 @@ def cmd_build_package(args: argparse.Namespace) -> int:
     radio_info = default_radio_info(audio_dir)
     root = parse_xml(radio_info).getroot()
     restore_targets = load_playlist_plan_builtin_targets(args.playlist_plan, root)
+    validate_split_builtin_targets(args.playlist_plan, root, restore_targets)
     restore_radios = {int(target["radio"]) for target in restore_targets}
     playlist_groups = load_playlist_plan_groups(
         args.playlist_plan,

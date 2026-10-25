@@ -343,7 +343,7 @@ void main() {
     },
   );
   test(
-    'incomplete assignment is blocked before existing prepared package is replaced',
+    'incomplete Event assignment is blocked before existing prepared package is replaced',
     () async {
       final f = await fixture.fixture();
       final c = f.container;
@@ -355,7 +355,7 @@ void main() {
       final plan = const PlaylistPlan.empty().assign(
         source: source,
         radioCode: 'R1',
-        playlistType: 'FreeRoam',
+        playlistType: 'Event',
         slot: 1,
         projectDir: f.dir.path,
       );

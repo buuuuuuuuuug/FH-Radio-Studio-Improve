@@ -246,14 +246,21 @@ class TrackTimingStore {
   static String? writeBuildManifest({
     required String projectDir,
     required List<String> musicInputs,
+    Set<String> freeRoamOnlySources = const {},
   }) {
     final configs = readAll(projectDir);
     final files = FhRadioStudioProject.collectAudioFiles(musicInputs);
     final tracks = <Map<String, dynamic>>[];
     for (final file in files) {
       final config = configs[TrackTimingConfig.keyForPath(file.path)];
-      if (config == null || !config.allConfirmed) continue;
-      if (!trackMarkerKeys.every(config.markersSec.containsKey)) continue;
+      if (config == null) continue;
+      final automatic = freeRoamOnlySources.contains(
+        TrackTimingConfig.keyForPath(file.path),
+      );
+      if (!automatic && !config.allConfirmed) continue;
+      if (!automatic && !trackMarkerKeys.every(config.markersSec.containsKey)) {
+        continue;
+      }
       tracks.add(_withTrackKey(projectDir, config).toJson());
     }
     if (tracks.isEmpty) return null;

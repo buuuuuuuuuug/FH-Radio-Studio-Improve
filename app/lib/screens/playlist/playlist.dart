@@ -1,4 +1,3 @@
-import '../../widgets/split_playlist_dialog.dart';
 import '../../widgets/cross_radio_assignment_notice.dart';
 import '../../widgets/feature_tour.dart';
 import '../../widgets/package_publication_recovery.dart';
@@ -8,7 +7,9 @@ import '../../widgets/open_package_folder_button.dart';
 import '../../core/playlist_capacity.dart';
 import '../../core/playlist_action_errors.dart';
 import '../../widgets/quick_assign_dialog.dart';
+import '../../widgets/split_playlist_setting.dart';
 import '../../core/track_timing_config.dart';
+import '../../core/playlist_timing_requirements.dart';
 import '../../state/editor_navigation.dart';
 import '../../core/song_selection.dart';
 import '../../widgets/batch_assignment_dialog.dart';
@@ -261,7 +262,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
         radios: radios,
         tracks: tracks,
         splitTypes: state.splitPlaylistTypes,
-        initialType: state.mode == PlaylistMode.event ? 'Event' : 'FreeRoam',
+        initialType: state.splitPlaylistTypes ? 'Event' : 'FreeRoam',
         info: (radio, type) {
           var base = plan;
           if (!base.hasDraft &&
@@ -327,7 +328,8 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
         content: Text(
           success
               ? '已分配到 ${choice.radio}，可撤销此次批量操作。'
-              : '分配未完成：容量或项目状态已变化，未部分写入。',
+              : ref.read(playlistProvider.notifier).lastEditBlockedReason ??
+                    '分配未完成：容量或项目状态已变化，未部分写入。',
         ),
       ),
     );
@@ -388,7 +390,8 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '${radio.name} 容量不足（上限 $maxSlots 首），整批 ${data.tracks.length} 首均未移动。',
+              ref.read(playlistProvider.notifier).lastEditBlockedReason ??
+                  '${radio.name} 容量不足（上限 $maxSlots 首），整批 ${data.tracks.length} 首均未移动。',
             ),
           ),
         );
@@ -426,6 +429,55 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
     ref
         .read(playlistProvider.notifier)
         .restoreBuiltin(radio.code, playlistType);
+  }
+
+  Future<void> _useOtherScenePlaylist(
+    RadioStation radio,
+    String playlistType,
+  ) async {
+    final fromType = playlistType == 'Event' ? 'FreeRoam' : 'Event';
+    final project = ref.read(studioProvider).projectDir;
+    final plan = ref.read(effectivePlaylistPlanProvider);
+    final confirmed = await _confirmRestoreBuiltin(
+      context,
+      radio: radio,
+      playlistType: playlistType,
+      assignedTracks: ref
+          .read(playlistProvider)
+          .tracksOfRadio(radio.code, playlistType, plan),
+      copyFromType: fromType,
+    );
+    if (!confirmed || !mounted) return;
+    if (ref.read(studioProvider).projectDir != project ||
+        ref.read(effectivePlaylistPlanProvider).encodeForStorage() !=
+            plan.encodeForStorage()) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('歌单已变化，请重新打开窗口确认。')));
+      return;
+    }
+    final notifier = ref.read(playlistProvider.notifier);
+    try {
+      final copied = notifier.copyScenePlaylist(
+        radio.code,
+        fromType: fromType,
+        toType: playlistType,
+      );
+      if (copied) _selection = SongSelection();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            copied
+                ? '已在 ${radio.code} 的${_playlistLabel(playlistType)}中使用${_playlistLabel(fromType)}歌单；来源歌单保留，可撤销或保存。'
+                : notifier.lastEditBlockedReason ?? '当前无法套用另一场景的歌单。',
+          ),
+        ),
+      );
+    } on Object catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(playlistActionFailure('套用场景歌单', error))),
+      );
+    }
   }
 
   Future<void> _handlePoolDrop(
@@ -475,7 +527,19 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
     required RadioStation radio,
     required String playlistType,
     required List<PoolTrack> assignedTracks,
+    String? copyFromType,
   }) async {
+    final otherType = playlistType == 'Event' ? 'FreeRoam' : 'Event';
+    final blockedMixedRestore =
+        copyFromType == null &&
+        ref.read(playlistProvider).splitPlaylistTypes &&
+        (ref
+                .read(effectivePlaylistPlanProvider)
+                .hasAssignmentsForRadio(radio.code, otherType) ||
+            ref
+                    .read(playlistCatalogProvider)
+                    .modeOfList(radio.code, otherType) ==
+                StationMode.custom);
     final result = await showDialog<bool>(
       context: context,
       barrierColor: RmTokens.modalBackdrop,
@@ -503,15 +567,24 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('恢复游戏原版', style: RmText.microLabel(color: rm.warn)),
+                      Text(
+                        copyFromType == null ? '恢复游戏原版' : '套用另一场景歌单',
+                        style: RmText.microLabel(color: rm.warn),
+                      ),
                       const SizedBox(height: 8),
                       Text(
-                        '把 ${radio.name} 的${_playlistLabel(playlistType)}列表恢复为 builtin？',
+                        copyFromType == null
+                            ? '把 ${radio.name} 的${_playlistLabel(playlistType)}列表恢复为 builtin？'
+                            : '在 ${radio.name} 的${_playlistLabel(playlistType)}中使用${_playlistLabel(copyFromType)}歌单？',
                         style: RmText.modalH2(color: rm.fg),
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        '这会清空当前列表里的自建曲目分配；下次生成包时，这个列表不再参与替换。',
+                        copyFromType != null
+                            ? '这会替换当前场景的歌曲与顺序，来源歌单保留，可撤销。不支持一边原版、一边自建。'
+                            : blockedMixedRestore
+                            ? '两场景共用曲库，暂不支持一边原版、一边自建。请先关闭分场景编辑，合并列表后恢复整台。'
+                            : '这会清空当前列表里的自建曲目分配；下次生成包时，这个列表不再参与替换。',
                         style: RmText.sans(13, color: rm.fg3, height: 1.45),
                       ),
                     ],
@@ -524,7 +597,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          '将移出的自建曲目',
+                          copyFromType == null ? '将移出的自建曲目' : '将替换的当前歌单',
                           style: RmText.microLabel(color: rm.fg3),
                         ),
                         const SizedBox(height: 8),
@@ -540,6 +613,33 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                               ),
                           ],
                         ),
+                        if (copyFromType != null) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            '将使用的${_playlistLabel(copyFromType)}歌单',
+                            style: RmText.microLabel(color: rm.fg3),
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              for (final track
+                                  in ref
+                                      .read(playlistProvider)
+                                      .tracksOfRadio(
+                                        radio.code,
+                                        copyFromType,
+                                        ref.read(effectivePlaylistPlanProvider),
+                                      ))
+                                RmChip(
+                                  label: track.title,
+                                  variant: RmChipVariant.accent,
+                                  showDot: true,
+                                ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -558,10 +658,16 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                       ),
                       const SizedBox(width: 10),
                       RmButton(
-                        onPressed: () => Navigator.of(context).pop(true),
+                        onPressed: blockedMixedRestore
+                            ? null
+                            : () => Navigator.of(context).pop(true),
                         variant: RmButtonVariant.primary,
-                        leading: const RmIcon('undo', size: 12),
-                        label: '恢复 builtin',
+                        leading: copyFromType == null
+                            ? const RmIcon('undo', size: 12)
+                            : const Icon(Icons.swap_horiz, size: 14),
+                        label: copyFromType == null
+                            ? '恢复 builtin'
+                            : '使用${_playlistLabel(copyFromType)}歌单',
                       ),
                     ],
                   ),
@@ -575,113 +681,13 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
     return result == true;
   }
 
-  Future<void> _setSplitPlaylistTypes(
-    BuildContext context,
-    bool value,
-    PlaylistPlan plan,
-  ) async {
-    final notifier = ref.read(playlistProvider.notifier);
-    if (value) {
-      final ok = await _confirmSplitPlaylistTypes(context);
-      if (!ok || !mounted) return;
-      notifier.setSplitPlaylistTypes(true);
-      return;
-    }
-
-    var keepType = 'FreeRoam';
-    if (plan.hasSplitPlaylistDifferences) {
-      final selected = await _choosePlaylistTypeToKeep(context);
-      if (selected == null || !mounted) return;
-      keepType = selected;
-    }
-    final synced = plan.syncPlaylistTypesFrom(keepType);
-    ref.read(playlistPlanProvider.notifier).replaceWith(synced);
-    ref.read(playlistProvider.notifier)
-      ..setMode(
-        keepType == 'Event' ? PlaylistMode.event : PlaylistMode.freeroam,
-      )
-      ..setSplitPlaylistTypes(false);
-  }
-
-  Future<bool> _confirmSplitPlaylistTypes(BuildContext context) async =>
-      await showSplitPlaylistConfirmation(context) == true;
-
-  Future<String?> _choosePlaylistTypeToKeep(BuildContext context) {
-    return showDialog<String>(
-      context: context,
-      barrierColor: RmTokens.modalBackdrop,
-      builder: (context) {
-        final rm = context.rm;
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.all(40),
-          child: Container(
-            width: 520,
-            decoration: BoxDecoration(
-              color: rm.panel,
-              border: Border.all(color: rm.borderStrong),
-              borderRadius: BorderRadius.circular(RmTokens.rXl),
-              boxShadow: RmTokens.modal,
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 22, 24, 18),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('合并列表', style: RmText.microLabel(color: rm.warn)),
-                      const SizedBox(height: 8),
-                      Text('关闭前保留哪张列表？', style: RmText.modalH2(color: rm.fg)),
-                      const SizedBox(height: 10),
-                      Text(
-                        '当前 FreeRoam 和 Event 不一致。关闭高级模式后，会用你选择的列表覆盖另一张，并回到统一编辑。',
-                        style: RmText.sans(13, color: rm.fg3, height: 1.45),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.fromLTRB(24, 14, 24, 22),
-                  decoration: BoxDecoration(
-                    border: Border(top: BorderSide(color: rm.border)),
-                  ),
-                  child: Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: 10,
-                    runSpacing: 8,
-                    children: [
-                      RmButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        label: '取消',
-                      ),
-                      RmButton(
-                        onPressed: () => Navigator.of(context).pop('FreeRoam'),
-                        leading: const RmIcon('map', size: 12),
-                        label: '保留漫游',
-                      ),
-                      RmButton(
-                        onPressed: () => Navigator.of(context).pop('Event'),
-                        variant: RmButtonVariant.primary,
-                        leading: const RmIcon('flag', size: 12),
-                        label: '保留比赛',
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Future<void> _copyGameLayoutToPackage(BuildContext context) async {
     final catalog = ref.read(gamePlaylistCatalogProvider);
+    final sceneState = ref.read(playlistProvider);
+    final unifiedType = sceneState.mode == PlaylistMode.event
+        ? 'Event'
+        : 'FreeRoam';
+    final unifiedLabel = PlaylistAssignment.playlistLabel(unifiedType);
     final messenger = ScaffoldMessenger.of(context);
     if (catalog.failed) {
       messenger.showSnackBar(
@@ -716,7 +722,8 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  '这会替换准备包中当前的歌曲分配与顺序，包括尚未保存的修改。歌曲和时间点不会删除；复制后可撤销。',
+                  '这会替换准备包中当前的歌曲分配与顺序，包括尚未保存的修改。歌曲和时间点不会删除；复制后可撤销。'
+                  '${sceneState.splitPlaylistTypes ? '' : '\n当前为统一编辑：采用游戏内$unifiedLabel列表，并同时用于漫游和比赛；已保留的分场景列表不变。'}',
                   style: RmText.body(color: context.rm.fg2),
                 ),
                 const SizedBox(height: 20),
@@ -747,7 +754,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
     try {
       final copied = ref
           .read(playlistProvider.notifier)
-          .copyGameLayout(catalog);
+          .copyGameLayout(catalog, unifiedType: unifiedType);
       ref.read(playlistCatalogViewProvider.notifier).state =
           PlaylistCatalogView.package;
       messenger.showSnackBar(
@@ -779,12 +786,34 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
 
   Future<void> _preparePackage(BuildContext context) async {
     final plan = editableAssignmentPlan(ref);
+    final radiosMissingScene =
+        {
+              for (final assignment in plan.assignments.values)
+                if (assignment.isAssigned) assignment.radioCode,
+            }
+            .where(
+              (radio) =>
+                  plan.assignmentsForRadio(radio, 'FreeRoam').isEmpty ||
+                  plan.assignmentsForRadio(radio, 'Event').isEmpty,
+            )
+            .toList();
+    if (radiosMissingScene.isNotEmpty) {
+      await showPackageBuildNoticeDialog(
+        context,
+        message:
+            '${radiosMissingScene.join('、')} 的漫游或比赛列表为空。两场景共用曲库，目前必须都安排至少一首自建歌曲，暂不支持一边原版、一边自建。请补齐另一场景，或关闭分场景编辑后使用统一列表。',
+        languageChanged: false,
+        showPlaylistAction: false,
+      );
+      return;
+    }
     final timings = ref.read(trackTimingProvider);
     final pool = ref.read(playlistProvider).pool;
     final incomplete = plan.assignments.values
         .where(
           (a) =>
               a.isAssigned &&
+              !isFreeRoamOnlySource(plan, a.source) &&
               timings[TrackTimingConfig.keyForPath(a.source)]?.allConfirmed !=
                   true,
         )
@@ -806,7 +835,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    '分配可以保留；完成以下歌曲的 6 个节点并保存后，才能构建准备包。',
+                    '分配可以保留；以下比赛歌曲需完成 6 个节点并保存。仅漫游歌曲无需人工确认，构建时自动补全有效点位。',
                     style: RmText.sans(12, color: context.rm.fg2),
                   ),
                   const SizedBox(height: 10),
@@ -1199,13 +1228,6 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
               RmSegmentedOption(value: PlaylistMode.event, label: 'Event · 比赛'),
             ],
           );
-          final splitSwitch = _SplitPlaylistSwitch(
-            value: s.splitPlaylistTypes,
-            onChanged: editingLocked
-                ? null
-                : (value) =>
-                      unawaited(_setSplitPlaylistTypes(context, value, plan)),
-          );
           final baseChip = Tooltip(
             message: catalog.badgeTooltip,
             child: RmChip(
@@ -1219,6 +1241,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
             ),
           );
           final search = SizedBox(
+            height: 38,
             width: (constraints.maxWidth - 260).clamp(
               0.0,
               constraints.maxWidth,
@@ -1237,10 +1260,20 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                   child: RmIcon('search', size: 13, color: rm.fg3),
                 ),
                 prefixIconConstraints: const BoxConstraints(minWidth: 30),
+                suffixIconConstraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 32,
+                ),
                 suffixIcon: s.search.isEmpty
                     ? null
                     : IconButton(
+                        key: const ValueKey('playlist-clear-search'),
                         tooltip: '清空搜索',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 32,
+                          height: 32,
+                        ),
                         icon: Icon(Icons.close, size: 14, color: rm.fg3),
                         onPressed: () {
                           _search.clear();
@@ -1323,11 +1356,11 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                           : () => _restorePlaylistHistory(redo: true),
                     ),
                   ],
-                  splitSwitch,
+                  const SplitPlaylistSetting(),
                   if (s.splitPlaylistTypes) segmented,
                   if (s.splitPlaylistTypes)
                     Text(
-                      '分场景编辑为实验功能，当前不推荐使用；建议关闭后使用统一列表。',
+                      '分场景编辑 · 实验功能；分别安排漫游和比赛，关闭后保留两套排布。',
                       style: RmText.sans(12, color: rm.warn),
                     ),
                   if (view == PlaylistCatalogView.package)
@@ -1668,6 +1701,13 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
         : isCustom
         ? replaceableCapacity
         : originalTrackCount;
+    final sharedBankCount = readOnly
+        ? {
+            for (final type in const ['FreeRoam', 'Event'])
+              for (final track in catalog.tracksOfRadio(r.code, type))
+                track.soundName ?? track.id,
+          }.length
+        : plan.sourcesForRadio(r.code).length;
 
     final bySource = {
       for (final t in s.pool) PlaylistAssignment.keyForPath(t.source): t,
@@ -1680,6 +1720,12 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
     }
 
     Widget buildColumn() {
+      final otherType = playlistType == 'Event' ? 'FreeRoam' : 'Event';
+      final otherHasCustom =
+          !plan.hasBuiltinOverride(r.code, otherType) &&
+          plan.hasAssignmentsForRadio(r.code, otherType);
+      final showSceneAction =
+          s.splitPlaylistTypes && !readOnly && (isCustom || otherHasCustom);
       final editableCustom =
           isCustom && !readOnly && (customTracks.isNotEmpty || draftCustom);
       Widget item(BuildContext context, int index) {
@@ -1730,7 +1776,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
         final t = originalTracks[index];
         final local = isCustom ? localTrack(t) : null;
         return TrackCard(
-          notConfiguredProgress: local != null && !local.configured
+          notConfiguredProgress: local != null && !local.readyForBuild
               ? '${local.confirmed}/4'
               : null,
           order: originalTrackRefs.indexOf(t) + 1,
@@ -1753,23 +1799,48 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
         pendingCount: readOnly || !isCustom
             ? 0
             : editableCustom
-            ? customTracks.where((t) => !t.configured).length
+            ? customTracks.where((t) => !t.readyForBuild).length
             : originalTrackRefs
                   .map(localTrack)
                   .whereType<PoolTrack>()
-                  .where((t) => !t.configured)
+                  .where((t) => !t.readyForBuild)
                   .length,
         capacity: capacity,
         originalCount: baselineCatalog == null
             ? r.slot
             : baselineCatalog.tracksOfRadio(r.code, playlistType).length,
-        onRestoreBuiltin: !readOnly && !editingLocked && isCustom
+        onRestoreBuiltin:
+            !s.splitPlaylistTypes && !readOnly && !editingLocked && isCustom
             ? () => unawaited(_restoreBuiltin(r, playlistType, customTracks))
+            : null,
+        headerActionLabel: showSceneAction
+            ? '使用${_playlistLabel(playlistType == 'Event' ? 'FreeRoam' : 'Event')}歌单'
+            : null,
+        headerActionTooltip: '将另一场景的歌曲与顺序套用到当前场景，来源歌单保留。两场景不支持一边原版、一边自建。',
+        onHeaderAction: showSceneAction && !editingLocked && otherHasCustom
+            ? () => _useOtherScenePlaylist(r, playlistType)
             : null,
         itemCount: editableCustom
             ? assignedTracks.length
             : originalTracks.length,
         itemBuilder: item,
+        filterControls: showSceneAction
+            ? Padding(
+                padding: const EdgeInsets.fromLTRB(12, 6, 12, 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Tooltip(
+                      message: '漫游和比赛共用一份曲库，相同歌曲只占一个位置。不同歌曲合计超过原版容量时，需要开启电台扩容。',
+                      child: Text(
+                        '共用曲库 $sharedBankCount 首',
+                        style: RmText.mono(10.5, color: context.rm.fg3),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : null,
       );
     }
 
@@ -1858,7 +1929,13 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
     StudioState cli,
   ) {
     final assignmentLabelsByTrackKey = _assignmentLabelsByTrackKey(plan, s);
-    pool = browseSongs(pool, _browse, duplicates: duplicateSongs(s.pool));
+    pool = browseSongs(
+      pool,
+      _browse,
+      duplicates: duplicateSongs(s.pool),
+      plan: plan,
+      splitTypes: s.splitPlaylistTypes,
+    );
     final column = PlaylistColumn.poolBuilder(
       count: pool.length,
       itemCount: pool.length,
@@ -1870,10 +1947,14 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
             value: _browse,
             compact: true,
             showSearch: false,
-            onChanged: (v) => setState(() => _browse = v),
+            showScene: s.splitPlaylistTypes,
+            onChanged: (v) => setState(() {
+              if (v.scene != _browse.scene) _selection = SongSelection();
+              _browse = v;
+            }),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
             child: Row(
               children: [
                 Expanded(
@@ -1889,7 +1970,9 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                 ),
                 const SizedBox(width: 8),
                 ConstrainedBox(
-                  constraints: const BoxConstraints.tightFor(width: 84),
+                  constraints: const BoxConstraints.tightFor(
+                    width: songBrowseActionWidth,
+                  ),
                   child: RmButton(
                     key: const ValueKey('playlist-multiselect-toggle'),
                     size: RmButtonSize.md,
@@ -2196,132 +2279,6 @@ class _DragTargetHoverFrame extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _SplitPlaylistSwitch extends StatelessWidget {
-  const _SplitPlaylistSwitch({required this.value, required this.onChanged});
-
-  final bool value;
-  final ValueChanged<bool>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final rm = context.rm;
-    if (!value) {
-      return _SplitPlaylistButton(
-        onPressed: onChanged == null ? null : () => onChanged!(true),
-        color: rm.info,
-        bg: Color.alphaBlend(rm.info.withAlpha(12), rm.raised),
-        hoverBg: Color.alphaBlend(rm.info.withAlpha(22), rm.hover),
-        border: rm.info.withAlpha(110),
-      );
-    }
-    return Container(
-      height: 32,
-      padding: const EdgeInsets.only(left: 10, right: 6),
-      decoration: BoxDecoration(
-        color: value
-            ? Color.alphaBlend(rm.info.withAlpha(14), rm.hover)
-            : rm.raised,
-        borderRadius: BorderRadius.circular(RmTokens.rSm),
-        border: Border.all(color: value ? rm.info : rm.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            '分场景编辑',
-            style: RmText.sans(
-              12,
-              color: value ? rm.info : rm.fg3,
-              weight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Transform.scale(
-            scale: 0.72,
-            child: Switch(
-              value: value,
-              onChanged: onChanged,
-              activeThumbColor: rm.info,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SplitPlaylistButton extends StatefulWidget {
-  const _SplitPlaylistButton({
-    required this.onPressed,
-    required this.color,
-    required this.bg,
-    required this.hoverBg,
-    required this.border,
-  });
-
-  final VoidCallback? onPressed;
-  final Color color;
-  final Color bg;
-  final Color hoverBg;
-  final Color border;
-
-  @override
-  State<_SplitPlaylistButton> createState() => _SplitPlaylistButtonState();
-}
-
-class _SplitPlaylistButtonState extends State<_SplitPlaylistButton> {
-  bool _hover = false;
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final disabled = widget.onPressed == null;
-    return MouseRegion(
-      cursor: disabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
-      onEnter: disabled ? null : (_) => setState(() => _hover = true),
-      onExit: disabled ? null : (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTapDown: disabled ? null : (_) => setState(() => _pressed = true),
-        onTapUp: disabled ? null : (_) => setState(() => _pressed = false),
-        onTapCancel: disabled ? null : () => setState(() => _pressed = false),
-        onTap: widget.onPressed,
-        child: Opacity(
-          opacity: disabled ? 0.45 : 1,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            height: 32,
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            transform: _pressed
-                ? (Matrix4.identity()..translateByDouble(0, 0.5, 0, 0))
-                : Matrix4.identity(),
-            decoration: BoxDecoration(
-              color: _hover ? widget.hoverBg : widget.bg,
-              borderRadius: BorderRadius.circular(RmTokens.rSm),
-              border: Border.all(color: widget.border),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                RmIcon('list', size: 12, color: widget.color),
-                const SizedBox(width: 8),
-                Text(
-                  '分场景编辑',
-                  style: RmText.sans(
-                    12.5,
-                    color: widget.color,
-                    weight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

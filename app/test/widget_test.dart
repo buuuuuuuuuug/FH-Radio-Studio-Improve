@@ -614,7 +614,7 @@ void main() {
   });
 
   testWidgets(
-    'custom song editor sorts least configured first and filters completed',
+    'custom song editor defaults to filename order and filters completed',
     (tester) async {
       final semantics = tester.ensureSemantics();
       addTearDown(() {
@@ -697,8 +697,8 @@ void main() {
       final zeroTop = tester.getTopLeft(find.text('Zero Config')).dy;
       final halfTop = tester.getTopLeft(find.text('Half Config')).dy;
       final doneTop = tester.getTopLeft(find.text('Done Config')).dy;
-      expect(zeroTop, lessThan(halfTop));
-      expect(halfTop, lessThan(doneTop));
+      expect(doneTop, lessThan(halfTop));
+      expect(halfTop, lessThan(zeroTop));
 
       await tester.tap(find.text('已完成 · 1'));
       await tester.pump();
@@ -711,7 +711,7 @@ void main() {
     },
   );
 
-  testWidgets('custom pool filters MSR imports and sorts MSR first on ties', (
+  testWidgets('custom pool filters MSR imports and keeps filename order', (
     tester,
   ) async {
     final semantics = tester.ensureSemantics();
@@ -796,8 +796,8 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('MSR · 1'), findsOneWidget);
     expect(
-      tester.getTopLeft(find.text('Siren Tie')).dy,
-      lessThan(tester.getTopLeft(find.text('Local Tie')).dy),
+      tester.getTopLeft(find.text('Local Tie')).dy,
+      lessThan(tester.getTopLeft(find.text('Siren Tie')).dy),
     );
 
     await tester.tap(find.byKey(const ValueKey('custom-pool-msr-only-switch')));
@@ -1038,6 +1038,10 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('播放列表'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('split-playlist-setting')),
+      findsOneWidget,
+    );
     expect(find.text('分场景编辑'), findsOneWidget);
     expect(find.text('统一写入漫游和比赛'), findsNothing);
     expect(find.text('Full Flow Test'), findsWidgets);
@@ -1134,6 +1138,10 @@ void main() {
       expect(find.text('当前准备包'), findsOneWidget);
       expect(find.text('准备包'), findsOneWidget);
       expect(find.text('复制游戏内排布'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('split-playlist-setting')),
+        findsOneWidget,
+      );
       expect(find.text('分场景编辑'), findsOneWidget);
       expect(find.text('FreeRoam · 漫游'), findsNothing);
       expect(find.text('Event · 比赛'), findsNothing);
@@ -1142,18 +1150,11 @@ void main() {
       expect(find.text('builtin · 锁定'), findsWidgets);
       expect(find.text('统一写入漫游和比赛'), findsNothing);
 
-      await tester.tap(find.text('分场景编辑'));
+      await tester.tap(find.byKey(const ValueKey('split-playlist-setting')));
       await tester.pumpAndSettle();
-
-      expect(tester.takeException(), isNull);
-      expect(find.text('分开编辑漫游和比赛？'), findsOneWidget);
-      expect(
-        find.byKey(const ValueKey('split-playlist-enable-warning')),
-        findsOneWidget,
-      );
-      await tester.tap(find.text('取消'));
+      expect(find.text('请先开启电台扩容'), findsOneWidget);
+      await tester.tap(find.text('知道了'));
       await tester.pumpAndSettle();
-      expect(find.text('分开编辑漫游和比赛？'), findsNothing);
 
       await tester.tap(find.text('游戏内'));
       await tester.pump();
@@ -1163,6 +1164,10 @@ void main() {
       expect(find.text('当前游戏内'), findsOneWidget);
       expect(find.text('游戏内'), findsOneWidget);
       expect(find.text('复制游戏内排布'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('split-playlist-setting')),
+        findsOneWidget,
+      );
       expect(find.text('分场景编辑'), findsOneWidget);
       expect(find.text('FreeRoam · 漫游'), findsNothing);
       expect(find.text('Event · 比赛'), findsNothing);
@@ -1267,9 +1272,17 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('User Song'), findsNWidgets(2));
     expect(find.text('Original XS'), findsNothing);
-    expect(find.text('R4 · 1'), findsOneWidget);
+    expect(find.text('R4 · 漫游1'), findsOneWidget);
+    expect(find.text('FreeRoam · 漫游'), findsOneWidget);
+    expect(find.text('共用曲库 1 首'), findsOneWidget);
     expect(find.text('custom'), findsWidgets);
-    expect(find.byTooltip('恢复当前列表为 builtin'), findsOneWidget);
+    expect(find.byTooltip('恢复当前列表为 builtin'), findsNothing);
+    final useEvent = find.byWidgetPredicate(
+      (widget) => widget is RmButton && widget.tooltip == '使用比赛歌单',
+    );
+    expect(useEvent, findsOneWidget);
+    expect(tester.widget<RmButton>(useEvent).onPressed, isNull);
+    expect(find.text('不支持一边原版、一边自建'), findsNothing);
   });
 
   testWidgets('playlist pool labels assignments from the current list', (

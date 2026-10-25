@@ -686,7 +686,7 @@ void main() {
   );
 
   testWidgets(
-    'browse controls show direction, explanatory default and no extra playlist search',
+    'browse controls default to filename and do not duplicate playlist search',
     (tester) async {
       var value = const SongBrowse();
       await tester.pumpWidget(
@@ -711,7 +711,7 @@ void main() {
         ),
       );
       expect(find.byType(TextField), findsNothing);
-      expect(find.text('编辑器顺序（默认按歌手）'), findsOneWidget);
+      expect(find.text('文件名称'), findsOneWidget);
       expect(find.text('分配的电台'), findsNothing);
       await tester.tap(find.text('正序'));
       await tester.pump();

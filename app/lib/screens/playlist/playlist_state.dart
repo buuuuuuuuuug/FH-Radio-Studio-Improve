@@ -1,7 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/widgets.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/playlist_plan.dart';
+import '../../core/playlist_capacity.dart';
+import '../../core/project_workspace.dart';
 import '../../domain/radio_library.dart';
 import '../../state/studio_state.dart';
 import '../../state/custom_pool_tracks.dart';
@@ -145,23 +150,46 @@ Set<String> _assignedTrackKeys(PlaylistPlan plan) {
 }
 
 class PlaylistNotifier extends StateNotifier<PlaylistState> {
-  PlaylistNotifier(this.ref, List<PoolTrack> pool)
+  PlaylistNotifier(this.ref, List<PoolTrack> pool, {bool splitTypes = false})
     : super(
         PlaylistState(
           pool: List<PoolTrack>.from(pool),
           mode: PlaylistMode.freeroam,
           search: '',
-          splitPlaylistTypes: false,
+          splitPlaylistTypes: splitTypes,
         ),
       );
 
   final Ref ref;
+  String? lastEditBlockedReason;
 
   void setMode(PlaylistMode m) => state = state.copyWith(mode: m);
   void setSearch(String s) => state = state.copyWith(search: s);
-  void setSplitPlaylistTypes(bool value) {
+  void setSplitPlaylistTypes(bool value, {String keepType = 'FreeRoam'}) {
     if (_editingLocked) return;
+    if (value == state.splitPlaylistTypes) return;
+    final next = _editablePlan().setSplitMode(value, keepType: keepType);
+    ref.read(playlistPlanProvider.notifier).replaceWith(next);
     state = state.copyWith(splitPlaylistTypes: value);
+  }
+
+  // A saved, reconstructed or undone split layout must never be silently
+  // collapsed by the next ordinary drag while the scene switch is hidden.
+  void preserveSplitLayout(bool hasDifferences) {
+    if (hasDifferences != state.splitPlaylistTypes) {
+      // Riverpod may refresh a derived layout lazily during a widget rebuild.
+      // Publish that UI change after the frame, never from inside build.
+      if (SchedulerBinding.instance.schedulerPhase ==
+          SchedulerPhase.persistentCallbacks) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            preserveSplitLayout(ref.read(_loadedSplitLayoutProvider));
+          }
+        });
+        return;
+      }
+      state = state.copyWith(splitPlaylistTypes: hasDifferences);
+    }
   }
 
   void setPool(List<PoolTrack> pool) {
@@ -223,12 +251,25 @@ class PlaylistNotifier extends StateNotifier<PlaylistState> {
     String? originRadioCode,
     String? originPlaylistType,
   }) {
+    lastEditBlockedReason = null;
     if (_editingLocked) return false;
     final track = _trackById(trackId);
     if (track == null) return false;
     final targetRadio = radioCode.trim().toUpperCase();
     final targetType = PlaylistAssignment.normalizePlaylistType(playlistType);
     var plan = _editablePlan();
+    if (originRadioCode != null &&
+        originPlaylistType != null &&
+        _wouldEmptySplitList(
+          plan,
+          [track.source],
+          radioCode: originRadioCode,
+          playlistType: originPlaylistType,
+          targetRadioCode: targetRadio,
+          targetPlaylistType: targetType,
+        )) {
+      return false;
+    }
     if (!state.splitPlaylistTypes) {
       plan = plan.syncPlaylistTypesFrom(targetType);
     }
@@ -301,6 +342,7 @@ class PlaylistNotifier extends StateNotifier<PlaylistState> {
     String? originRadioCode,
     String? originPlaylistType,
   }) {
+    lastEditBlockedReason = null;
     if (_editingLocked) return false;
     final tracks = <PoolTrack>[];
     final seen = <String>{};
@@ -313,6 +355,18 @@ class PlaylistNotifier extends StateNotifier<PlaylistState> {
     }
     if (tracks.isEmpty) return false;
     var plan = _editablePlan();
+    if (originRadioCode != null &&
+        originPlaylistType != null &&
+        _wouldEmptySplitList(
+          plan,
+          tracks.map((t) => t.source),
+          radioCode: originRadioCode,
+          playlistType: originPlaylistType,
+          targetRadioCode: radioCode,
+          targetPlaylistType: playlistType,
+        )) {
+      return false;
+    }
     if (!state.splitPlaylistTypes) {
       plan = plan.syncPlaylistTypesFrom(playlistType);
     }
@@ -394,10 +448,19 @@ class PlaylistNotifier extends StateNotifier<PlaylistState> {
     required String radioCode,
     required String playlistType,
   }) {
+    lastEditBlockedReason = null;
     if (_editingLocked) return;
     final tracks = [for (final id in ids) _trackById(id)];
     if (tracks.any((t) => t == null)) return;
     var plan = _editablePlan();
+    if (_wouldEmptySplitList(
+      plan,
+      tracks.map((t) => t!.source),
+      radioCode: radioCode,
+      playlistType: playlistType,
+    )) {
+      return;
+    }
     if (!state.splitPlaylistTypes) {
       plan = plan.syncPlaylistTypesFrom(playlistType);
     }
@@ -458,9 +521,18 @@ class PlaylistNotifier extends StateNotifier<PlaylistState> {
           );
 
   void _unassign(String trackId, {String? radioCode, String? playlistType}) {
+    lastEditBlockedReason = null;
     if (_editingLocked) return;
     final track = _trackById(trackId);
     if (track == null) return;
+    if (_wouldEmptySplitList(
+      _editablePlan(),
+      [track.source],
+      radioCode: radioCode,
+      playlistType: playlistType,
+    )) {
+      return;
+    }
     if (!state.splitPlaylistTypes && playlistType != null) {
       _syncPlanFrom(playlistType);
     } else {
@@ -485,8 +557,80 @@ class PlaylistNotifier extends StateNotifier<PlaylistState> {
       .read(playlistPlanProvider.notifier)
       .transaction(() => _restoreBuiltin(radioCode, playlistType));
 
+  /// Copy the other scene into this scene as one reversible edit.
+  bool copyScenePlaylist(
+    String radioCode, {
+    required String fromType,
+    required String toType,
+  }) {
+    lastEditBlockedReason = null;
+    final studio = ref.read(studioProvider);
+    if (studio.projectEditingLocked) {
+      lastEditBlockedReason = studio.projectEditingLockMessage;
+      return false;
+    }
+    if (!ref.read(_loadedSplitLayoutProvider)) {
+      lastEditBlockedReason = '请先启用分场景编辑，再使用另一场景的歌单。';
+      return false;
+    }
+    final radio = radioCode.trim().toUpperCase();
+    final from = PlaylistAssignment.normalizePlaylistType(fromType);
+    final to = PlaylistAssignment.normalizePlaylistType(toType);
+    if (radio.isEmpty || from == to) {
+      lastEditBlockedReason = '请选择同一电台的另一场景歌单。';
+      return false;
+    }
+    final plan = _editablePlan();
+    if (plan.hasBuiltinOverride(radio, from) ||
+        !plan.hasAssignmentsForRadio(radio, from)) {
+      lastEditBlockedReason =
+          '另一场景没有可复制的自建歌单。不支持一边原版、一边自建；如需恢复原版，请关闭分场景编辑后恢复整台。';
+      return false;
+    }
+    if (plan
+        .assignmentsForRadio(radio, from)
+        .any((assignment) => !File(assignment.source).existsSync())) {
+      lastEditBlockedReason = '另一场景有找不到的歌曲文件，请先重新导入或移除缺失歌曲，再复制歌单。';
+      return false;
+    }
+    try {
+      final copied = plan.copyScenePlaylist(
+        radioCode: radio,
+        fromType: from,
+        toType: to,
+      );
+      ref.read(playlistPlanProvider.notifier).transaction(() {
+        ref
+            .read(playlistPlanProvider.notifier)
+            .replaceWith(
+              PlaylistPlan(
+                assignments: copied.assignments,
+                builtinTargets: copied.builtinTargets,
+                // Legacy plans infer split mode from different scene lists.
+                // Copying makes those lists equal but must keep split editing on.
+                splitPlaylistTypes: true,
+                splitSnapshot: copied.splitSnapshot,
+              ),
+            );
+      });
+      return true;
+    } on PlaylistCapacityException catch (error) {
+      lastEditBlockedReason = error.toString();
+      return false;
+    }
+  }
+
   void _restoreBuiltin(String radioCode, String playlistType) {
+    lastEditBlockedReason = null;
     if (_editingLocked) return;
+    if (state.splitPlaylistTypes &&
+        _editablePlan().hasAssignmentsForRadio(
+          radioCode,
+          _otherPlaylistType(playlistType),
+        )) {
+      lastEditBlockedReason = '两场景共用曲库，暂不支持一边原版、一边自建。请先关闭分场景编辑，合并列表后恢复整台。';
+      return;
+    }
     final controller = ref.read(playlistPlanProvider.notifier);
     _ensureEditablePlanSeeded();
     if (!state.splitPlaylistTypes) {
@@ -504,18 +648,59 @@ class PlaylistNotifier extends StateNotifier<PlaylistState> {
     );
   }
 
-  int copyGameLayout(PlaylistCatalog catalog) {
+  int copyGameLayout(PlaylistCatalog catalog, {String? unifiedType}) {
     if (_editingLocked) return 0;
-    final plan = playlistPlanFromCatalog(
+    var plan = playlistPlanFromCatalog(
       catalog,
       state.pool,
       projectDir: ref.read(studioProvider).projectDir,
     );
+    if (!state.splitPlaylistTypes) {
+      plan = plan.syncPlaylistTypesFrom(
+        unifiedType ??
+            (state.mode == PlaylistMode.event ? 'Event' : 'FreeRoam'),
+      );
+    }
     ref.read(playlistPlanProvider.notifier).replaceWith(plan);
     return plan.assignments.length;
   }
 
   bool get _editingLocked => ref.read(studioProvider).projectEditingLocked;
+
+  bool _wouldEmptySplitList(
+    PlaylistPlan plan,
+    Iterable<String> sources, {
+    String? radioCode,
+    String? playlistType,
+    String? targetRadioCode,
+    String? targetPlaylistType,
+  }) {
+    if (!state.splitPlaylistTypes) return false;
+    final removed = sources.map(PlaylistAssignment.keyForPath).toSet();
+    final affected = plan.assignments.values.where(
+      (a) =>
+          removed.contains(PlaylistAssignment.keyForPath(a.source)) &&
+          (radioCode == null || a.radioCode == radioCode) &&
+          (playlistType == null || a.playlistType == playlistType),
+    );
+    for (final assignment in affected) {
+      if (assignment.radioCode == targetRadioCode &&
+          assignment.playlistType == targetPlaylistType) {
+        continue;
+      }
+      final existing = plan.assignmentsForRadio(
+        assignment.radioCode,
+        assignment.playlistType,
+      );
+      if (existing.every(
+        (a) => removed.contains(PlaylistAssignment.keyForPath(a.source)),
+      )) {
+        lastEditBlockedReason = '分场景列表暂不支持清空。请至少保留一首歌曲，或关闭分场景编辑后恢复整台原版。';
+        return true;
+      }
+    }
+    return false;
+  }
 
   PoolTrack? _trackById(String trackId) {
     for (final track in state.pool) {
@@ -605,13 +790,52 @@ PlaylistPlan playlistPlanFromCatalog(
 
 final playlistProvider = StateNotifierProvider<PlaylistNotifier, PlaylistState>(
   (ref) {
-    final notifier = PlaylistNotifier(ref, ref.read(realPoolTracksProvider));
+    ref.watch(studioProvider.select((s) => s.projectDir));
+    final notifier = PlaylistNotifier(
+      ref,
+      ref.read(realPoolTracksProvider),
+      splitTypes: ref.read(_loadedSplitLayoutProvider),
+    );
+    ref.listen<bool>(_loadedSplitLayoutProvider, (_, hasDifferences) {
+      notifier.preserveSplitLayout(hasDifferences);
+    });
     ref.listen<List<PoolTrack>>(
       realPoolTracksProvider,
       (_, next) => notifier.setPool(next),
     );
     return notifier;
   },
+  dependencies: [
+    studioProvider,
+    realPoolTracksProvider,
+    _loadedSplitLayoutProvider,
+  ],
+);
+
+final _loadedSplitLayoutProvider = Provider<bool>(
+  (ref) {
+    final plan = ref.watch(effectivePlaylistPlanProvider);
+    if (plan.splitPlaylistTypes != null) return plan.splitPlaylistTypes!;
+    if (FhRadioStudioProject.readSettings(
+          ref.read(studioProvider).projectDir,
+        )['split_playlist_types'] ==
+        true) {
+      return true;
+    }
+    if (ref.read(playlistPlanProvider.notifier).hasUserPlan || plan.hasDraft) {
+      return plan.hasSplitPlaylistDifferences;
+    }
+    return playlistPlanFromCatalog(
+      ref.watch(playlistCatalogProvider),
+      const [],
+      includeBuiltinTargets: false,
+    ).hasSplitPlaylistDifferences;
+  },
+  dependencies: [
+    effectivePlaylistPlanProvider,
+    playlistPlanProvider,
+    playlistCatalogProvider,
+  ],
 );
 
 int _configurationCompleteness(PoolTrack track) {

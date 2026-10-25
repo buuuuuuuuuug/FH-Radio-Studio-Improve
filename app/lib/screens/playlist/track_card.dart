@@ -65,7 +65,7 @@ class TrackCard extends StatefulWidget {
       durationSec: t.durationSec,
       locked: locked,
       custom: true,
-      notConfiguredProgress: t.configured ? null : '${t.confirmed}/4',
+      notConfiguredProgress: t.readyForBuild ? null : '${t.confirmed}/4',
       siren: t.isSiren,
       assignmentLabels: assignmentLabels,
       dragging: dragging,

@@ -186,11 +186,11 @@ void main() {
     'station double click opens correct song and Esc keeps playlist search and draft',
     (tester) async {
       final f = await setupPlaylist(tester);
-      await tester.enterText(
-        find.byKey(const ValueKey('playlist-search')),
-        'midnight',
-      );
+      final search = find.byKey(const ValueKey('playlist-search'));
+      final searchHeight = tester.getSize(search).height;
+      await tester.enterText(search, 'midnight');
       await tester.pump();
+      expect(tester.getSize(search).height, searchHeight);
       final card = find.descendant(
         of: find.byKey(const ValueKey('playlist-radio-column-R1')),
         matching: find.byType(TrackCard),
@@ -225,6 +225,10 @@ void main() {
       );
       expect(f.container.read(effectivePlaylistPlanProvider), f.plan);
       expect(find.text('双击自建曲目进入编辑'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('playlist-clear-search')));
+      await tester.pump();
+      expect(tester.widget<TextField>(search).controller!.text, isEmpty);
+      expect(tester.getSize(search).height, searchHeight);
       expect(tester.takeException(), isNull);
     },
   );
