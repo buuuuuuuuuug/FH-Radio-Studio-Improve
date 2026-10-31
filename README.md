@@ -4,7 +4,7 @@
 
 基于 [FH Radio Studio](https://github.com/Pzzzzz5142/FH-Radio-Studio) 持续改进，集成 [SeamlessLoopMusic](https://github.com/CPUrising/seamless-loop-music) 循环建议。当前主版本已整合歌曲、电台台呼和语音替换工作流。
 
-**[下载与版本说明](https://github.com/buuuuuuuuuug/FH-Radio-Studio-Improve/releases) · [详细功能说明](docs/改动说明-详细版.md) · [本次更新](docs/releases/v1.0.0-preview.1.md)**
+**[下载与版本说明](https://github.com/buuuuuuuuuug/FH-Audio-Studio/releases) · [详细功能说明](docs/改动说明-详细版.md) · [本次更新](docs/releases/v1.0.0-preview.1.md)**
 
 ## 核心功能
 
@@ -99,7 +99,7 @@
 
 这是我的第一次尝试。本 Fork 的改进代码由 **ChatGPT 辅助生成并持续调整，全程 Vibe Coding**。已进行自动化测试和本地运行验证，仍可能存在未发现的问题；具体版本的验证范围以 Release 说明为准。
 
-欢迎在 [Issues](https://github.com/buuuuuuuuuug/FH-Radio-Studio-Improve/issues) 提交问题和建议，并附上复现步骤、报错及截图。分享日志前请隐去个人信息。
+欢迎在 [Issues](https://github.com/buuuuuuuuuug/FH-Audio-Studio/issues) 提交问题和建议，并附上复现步骤、报错及截图。分享日志前请隐去个人信息。
 
 原项目与第三方组件的贡献归各自作者所有，本 Fork 的开发说明不代表原作者。项目与游戏官方无隶属关系，音频、工具和模型遵循各自适用的授权。
 
