@@ -342,16 +342,16 @@ class FhRadioStudioCli {
       onStderr?.call(line);
     }).asFuture<void>();
 
-    // Feed stdin only after the stdout/stderr drains are wired up, so a child
-    // that writes back while we write in cannot deadlock on a full pipe.
-    if (stdinInput != null) {
-      try {
+    // Drain output before writing, then always signal EOF. These invocations
+    // are non-interactive, including when no stdin payload was provided.
+    try {
+      if (stdinInput != null) {
         process.stdin.add(utf8.encode(stdinInput));
         await process.stdin.flush();
-        await process.stdin.close();
-      } catch (_) {
-        // Process may have already exited or been killed; ignore broken pipe.
       }
+      await process.stdin.close();
+    } catch (_) {
+      // Process may have already exited or been killed; ignore broken pipe.
     }
 
     int exitCode;

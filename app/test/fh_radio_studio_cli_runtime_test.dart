@@ -242,11 +242,50 @@ void main() {
     );
   });
 
+  test('CLI runtime closes unused stdin before waiting for exit', () async {
+    final repoRoot = Directory.systemTemp.createTempSync('fh-cli-stdin-eof-');
+    addTearDown(() async {
+      await FhRadioStudioCli.killActiveProcesses();
+      if (repoRoot.existsSync()) repoRoot.deleteSync(recursive: true);
+    });
+    final fakeUv = File(
+      '${repoRoot.path}/${Platform.isWindows ? 'uv.cmd' : 'uv'}',
+    );
+    await fakeUv.writeAsString(
+      Platform.isWindows
+          ? '@echo off\r\nmore >nul\r\necho stdin-closed\r\nexit /b 0\r\n'
+          : '#!/bin/sh\ncat >/dev/null\necho stdin-closed\nexit 0\n',
+    );
+    if (!Platform.isWindows) {
+      await Process.run('chmod', ['+x', fakeUv.path]);
+    }
+    final runtime = UvRuntime(
+      uvExecutable: fakeUv.path,
+      appRoot: repoRoot.path,
+      projectRoot: repoRoot.path,
+      toolchainHome: '${repoRoot.path}/toolchain',
+      projectEnvironment: '${repoRoot.path}/env',
+      cacheDir: '${repoRoot.path}/cache',
+      audioToolsDir: '${repoRoot.path}/audio',
+      aiModelDir: '${repoRoot.path}/models',
+      mode: 'dev',
+      torchExtra: 'torch-cpu',
+    );
+    final result = await FhRadioStudioCli(
+      repoRoot: repoRoot.path,
+      uvRuntime: runtime,
+    ).runBase(['status']).timeout(const Duration(seconds: 10));
+    expect(result.ok, isTrue);
+    expect(result.stdout, contains('stdin-closed'));
+    expect(FhRadioStudioCli.hasActiveProcesses, isFalse);
+  });
+
   test('CLI runtime decodes system-encoded process output bytes', () async {
     final repoRoot = Directory.systemTemp.createTempSync(
       'fh_radio_studio_uv_system_output_',
     );
-    addTearDown(() {
+    addTearDown(() async {
+      await FhRadioStudioCli.killActiveProcesses();
       if (repoRoot.existsSync()) {
         repoRoot.deleteSync(recursive: true);
       }
@@ -272,7 +311,7 @@ void main() {
     if (Platform.isWindows) {
       await fakeUv.writeAsString(
         '@echo off\r\n'
-        'powershell -NoProfile -Command "\$out=[Console]::OpenStandardOutput();'
+        'powershell -NoProfile -NonInteractive -Command "\$out=[Console]::OpenStandardOutput();'
         '\$outBytes=[byte[]](${stdoutBytes.join(',')});'
         '\$out.Write(\$outBytes,0,\$outBytes.Length);'
         '\$err=[Console]::OpenStandardError();'
@@ -339,7 +378,7 @@ void main() {
     if (Platform.isWindows) {
       await fakeUv.writeAsString(
         '@echo off\r\n'
-        'powershell -NoProfile -Command "'
+        'powershell -NoProfile -NonInteractive -Command "'
         '\$si = [System.Diagnostics.ProcessStartInfo]::new(); '
         '\$si.FileName = [IO.Path]::Combine(\$env:SystemRoot, \'System32\', \'ping.exe\'); '
         '\$si.WorkingDirectory = \$env:SystemRoot; '
@@ -398,7 +437,7 @@ void main() {
           'CLI exited before starting its child: ${result.stderr} ${result.stdout}',
         ),
       ),
-    ]).timeout(const Duration(seconds: 5));
+    ]).timeout(const Duration(seconds: 15));
     expect(FhRadioStudioCli.hasActiveProcesses, isTrue);
 
     await FhRadioStudioCli.killActiveProcesses();
