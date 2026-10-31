@@ -1,3 +1,5 @@
+import '../../widgets/audio_play_button.dart';
+import '../../widgets/editor_controls.dart';
 import 'editor_timecode.dart';
 import 'package:flutter/material.dart';
 
@@ -19,6 +21,9 @@ class TransportBar extends StatelessWidget {
     this.floating = false,
     this.compact = false,
     this.trailing,
+    this.onUndo,
+    this.onRedo,
+    this.actions = const [],
   });
 
   final ReplaceEditorState state;
@@ -33,6 +38,8 @@ class TransportBar extends StatelessWidget {
 
   /// 行尾追加的自定义控件（人工选点里放 A/B 端点切换）。
   final Widget? trailing;
+  final VoidCallback? onUndo, onRedo;
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
@@ -41,6 +48,20 @@ class TransportBar extends StatelessWidget {
     final durationText = ai.durationSec > 0
         ? formatEditorTimecode(ai.durationSec)
         : '--:--';
+
+    if (compact) {
+      return EditorTransport(
+        playing: state.playing,
+        onPlay: onTogglePlay,
+        position: Text(
+          '${formatEditorTimecode(state.playhead)} / $durationText',
+          style: RmText.mono(13, color: rm.fg2),
+        ),
+        onUndo: onUndo,
+        onRedo: onRedo,
+        actions: [...actions, ?trailing],
+      );
+    }
 
     return Container(
       padding: EdgeInsets.all(compact ? 9 : 12),
@@ -113,27 +134,12 @@ class TransportBar extends StatelessWidget {
   }
 
   Widget _playButton(BuildContext context) {
-    final rm = context.rm;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        key: ValueKey(floating ? 'editor-play-floating' : 'editor-play-inline'),
-        onTap: onTogglePlay,
-        child: Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: rm.accent.base,
-            shape: BoxShape.circle,
-          ),
-          alignment: Alignment.center,
-          child: RmIcon(
-            state.playing ? 'pause' : 'play',
-            size: 16,
-            color: rm.accent.onAccent,
-          ),
-        ),
+    return AudioPlayButton(
+      controlKey: ValueKey(
+        floating ? 'editor-play-floating' : 'editor-play-inline',
       ),
+      playing: state.playing,
+      onPressed: onTogglePlay,
     );
   }
 

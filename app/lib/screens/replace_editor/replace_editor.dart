@@ -1,3 +1,6 @@
+import '../../widgets/editor_columns.dart';
+import '../../widgets/editor_controls.dart';
+import '../../core/waveform_zoom.dart';
 import '../../core/demo_song.dart';
 import '../../widgets/feature_tour.dart';
 import 'waveform_overview.dart';
@@ -164,6 +167,7 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
   bool _manualDraftChanged = false;
   _ManualRefineSession? _manualInitial;
   final _manualUndo = <_ManualRefineSession>[];
+  final _manualRedo = <_ManualRefineSession>[];
   int _manualSuggestionCursor = -1;
   ReplaceEditorNotifier? _manualNotifier;
   bool _playbackInManual = false;
@@ -444,9 +448,14 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
       }
       return;
     }
-    if (manual && action == EditorAction.undo) {
+    if (manual &&
+        (action == EditorAction.undo || action == EditorAction.redo)) {
       TimeInputValidation.flush();
-      _undoManualDraft();
+      if (action == EditorAction.redo) {
+        _redoManualDraft();
+      } else {
+        _undoManualDraft();
+      }
       return;
     }
     if (manual &&
@@ -542,6 +551,8 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
       }
     } else if (action == EditorAction.undo) {
       n.undo();
+    } else if (action == EditorAction.redo) {
+      n.redo();
     } else if (!manual &&
         (action == EditorAction.previous || action == EditorAction.next)) {
       unawaited(
@@ -647,6 +658,7 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
           final manualAction =
               [
                 EditorAction.undo,
+                EditorAction.redo,
                 EditorAction.suggestionPrevious,
                 EditorAction.suggestionNext,
                 EditorAction.restoreSaved,
@@ -1091,7 +1103,7 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
         '${keys[EditorAction.toggleSnap]!.label} 切换磁吸/自由放置 · '
         '${keys[EditorAction.markPlayback]!.label} 取当前播放位置 · '
         '${keys[EditorAction.suggestionPrevious]!.label}/${keys[EditorAction.suggestionNext]!.label} 切换建议 · '
-        '${keys[EditorAction.restoreSaved]!.label} 已保存配置 · ${keys[EditorAction.undo]!.label} 撤销 · Esc 返回';
+        '${keys[EditorAction.restoreSaved]!.label} 已保存配置 · ${keys[EditorAction.undo]!.label} 撤销 · ${keys[EditorAction.redo]!.label} 重做 · Esc 返回';
   }
 
   Widget _manualRefineOverlay(
@@ -1132,6 +1144,7 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
               onMarkPlayback: _markManualPlayback,
               onPlace: (seconds, {required isMove}) =>
                   _placeManualDraft(seconds, isMove: isMove),
+              onSeek: (seconds) => unawaited(_seekTo(s, n, seconds)),
               onApplyCandidate: _applyAiCandidateToManual,
               onPickTarget: _setManualFineTarget,
               onNudge: _nudgeManualDraftTarget,
@@ -1147,6 +1160,7 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
                 }
               },
               onUndo: _manualUndo.isEmpty ? null : _undoManualDraft,
+              onRedo: _manualRedo.isEmpty ? null : _redoManualDraft,
               shortcutHint: _manualShortcutHint(),
               onConfirm: () => _confirmManualRefine(n),
               onTogglePlay: () => unawaited(
@@ -1363,6 +1377,7 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
       _manualInitial = session;
       _manualSuggestionCursor = -1;
       _manualUndo.clear();
+      _manualRedo.clear();
       _manualSession = session;
       _manualSnapToBeat = true;
       _manualPlayback = (
@@ -1402,6 +1417,7 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
       _manualUndo.add(current);
       if (_manualUndo.length > 200) _manualUndo.removeAt(0);
     }
+    _manualRedo.clear();
     setState(() {
       _manualSession = updated;
       _manualDraftChanged =
@@ -1409,11 +1425,16 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
     });
   }
 
-  void _undoManualDraft() {
+  void _undoManualDraft() => _restoreManualHistory(false);
+  void _redoManualDraft() => _restoreManualHistory(true);
+  void _restoreManualHistory(bool redo) {
     _keyRepeat.stop();
     _repeatKey = null;
-    if (_manualSession == null || _manualUndo.isEmpty) return;
-    final restored = _manualUndo.removeLast();
+    final from = redo ? _manualRedo : _manualUndo,
+        to = redo ? _manualUndo : _manualRedo;
+    if (_manualSession == null || from.isEmpty) return;
+    to.add(_manualSession!);
+    final restored = from.removeLast();
     _hotkeysFocus.requestFocus();
     setState(() {
       _manualSession = restored;
@@ -1801,6 +1822,7 @@ class _ReplaceEditorScreenState extends ConsumerState<ReplaceEditorScreen> {
         onZoomIn: n.zoomIn,
         onZoomOut: n.zoomOut,
         onWheelZoom: n.zoomByFactor,
+        onViewportWidth: (width) => n.waveformViewportWidth = width,
       ).tourAnchor('waveform'),
       transport: _transportBar(s, n, floating: false),
       after: [
@@ -3204,62 +3226,21 @@ class _FloatingSideDrawer extends StatelessWidget {
   }
 }
 
-class _ManualRefineWideBody extends StatefulWidget {
+class _ManualRefineWideBody extends StatelessWidget {
   const _ManualRefineWideBody({
     required this.main,
     required this.aiPanelBuilder,
   });
-
   final Widget main;
   final Widget Function(double height) aiPanelBuilder;
-
   @override
-  State<_ManualRefineWideBody> createState() => _ManualRefineWideBodyState();
-}
-
-class _ManualRefineWideBodyState extends State<_ManualRefineWideBody> {
-  final _mainKey = GlobalKey();
-  double? _mainHeight;
-
-  @override
-  void initState() {
-    super.initState();
-    _measureAfterFrame();
-  }
-
-  @override
-  void didUpdateWidget(covariant _ManualRefineWideBody oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _measureAfterFrame();
-  }
-
-  void _measureAfterFrame() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final renderObject = _mainKey.currentContext?.findRenderObject();
-      if (renderObject is! RenderBox || !renderObject.hasSize) return;
-      final next = renderObject.size.height;
-      if ((_mainHeight == null || (next - _mainHeight!).abs() > 0.5) &&
-          next > 0) {
-        setState(() => _mainHeight = next);
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    _measureAfterFrame();
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: KeyedSubtree(key: _mainKey, child: widget.main),
-        ),
-        const SizedBox(width: 12),
-        widget.aiPanelBuilder(_mainHeight ?? 420),
-      ],
-    );
-  }
+  Widget build(BuildContext context) => EditorColumns(
+    main: main,
+    sideWidth: 300,
+    side: LayoutBuilder(
+      builder: (context, box) => aiPanelBuilder(box.maxHeight),
+    ),
+  );
 }
 
 class _ManualRefineOverlay extends StatefulWidget {
@@ -3275,6 +3256,7 @@ class _ManualRefineOverlay extends StatefulWidget {
     required this.onToggleSnap,
     required this.onMarkPlayback,
     required this.onPlace,
+    required this.onSeek,
     required this.onApplyCandidate,
     required this.onPickTarget,
     required this.onNudge,
@@ -3282,6 +3264,7 @@ class _ManualRefineOverlay extends StatefulWidget {
     required this.onCancel,
     this.onTourComplete,
     required this.onUndo,
+    required this.onRedo,
     required this.shortcutHint,
     required this.onConfirm,
     required this.onTogglePlay,
@@ -3300,13 +3283,14 @@ class _ManualRefineOverlay extends StatefulWidget {
   final bool snapActive;
   final VoidCallback onToggleSnap, onMarkPlayback;
   final void Function(double seconds, {required bool isMove}) onPlace;
+  final ValueChanged<double> onSeek;
   final ValueChanged<dynamic> onApplyCandidate;
   final ValueChanged<FineTarget> onPickTarget;
   final void Function(FineTarget target, double deltaSec) onNudge;
   final VoidCallback onAudition;
   final VoidCallback onCancel;
   final VoidCallback? onTourComplete;
-  final VoidCallback? onUndo;
+  final VoidCallback? onUndo, onRedo;
   final String shortcutHint;
   final VoidCallback onConfirm;
   final VoidCallback onTogglePlay;
@@ -3336,6 +3320,7 @@ class _ManualRefineOverlayState extends State<_ManualRefineOverlay> {
   VoidCallback get onRewind => widget.onRewind;
   VoidCallback get onSkipFwd => widget.onSkipFwd;
   bool get seamless => widget.seamless;
+  double _zoomWidth = 800;
   double _zoomStart = 0;
   double? _zoomEnd;
   @override
@@ -3357,7 +3342,18 @@ class _ManualRefineOverlayState extends State<_ManualRefineOverlay> {
     final duration = state.ai.durationSec;
     if (duration <= 0) return;
     final span = ((_zoomEnd ?? duration) - _zoomStart) * factor;
-    final width = span.clamp(math.min(8.0, duration), duration).toDouble();
+    final width = span
+        .clamp(
+          minimumWaveformSpan(
+            duration: duration,
+            bins: state.ai.waveformPeaks.isEmpty
+                ? 512
+                : state.ai.waveformPeaks.length,
+            width: _zoomWidth,
+          ),
+          duration,
+        )
+        .toDouble();
     final center = state.playhead;
     setState(() {
       _zoomStart = (center - width / 2).clamp(0.0, duration - width);
@@ -3466,8 +3462,8 @@ class _ManualRefineOverlayState extends State<_ManualRefineOverlay> {
                 const SizedBox(height: 3),
                 Text(
                   session.kind.isLoop
-                      ? '点波形放置 A / B 两个循环端点，确认后锁定当前时间组。'
-                      : '点波形放置播放起点，确认后锁定当前时间组。',
+                      ? '左键定位播放；右键放置或拖动 A / B，确认后锁定。'
+                      : '左键定位播放；右键放置或拖动起点，确认后锁定。',
                   style: RmText.sans(12.5, color: rm.fg3),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -3540,31 +3536,16 @@ class _ManualRefineOverlayState extends State<_ManualRefineOverlay> {
       children: [
         _focusWaveform(context),
         const SizedBox(height: 10),
-        LayoutBuilder(
-          builder: (context, c) {
-            final separateControls = c.maxWidth < 680;
-            final transport = TransportBar(
-              state: state,
-              aiPending: false,
-              onTogglePlay: onTogglePlay,
-              onRewind: onRewind,
-              onSkipFwd: onSkipFwd,
-              compact: true,
-              trailing: separateControls ? null : _transportTrailing(context),
-            );
-            if (!separateControls) return transport;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                transport,
-                const SizedBox(height: 6),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: _transportTrailing(context),
-                ),
-              ],
-            );
-          },
+        TransportBar(
+          state: state,
+          aiPending: false,
+          compact: true,
+          onTogglePlay: onTogglePlay,
+          onRewind: onRewind,
+          onSkipFwd: onSkipFwd,
+          onUndo: widget.onUndo,
+          onRedo: widget.onRedo,
+          actions: _transportActions(context),
         ),
         const SizedBox(height: 10),
         _finePanel(context),
@@ -3613,13 +3594,7 @@ class _ManualRefineOverlayState extends State<_ManualRefineOverlay> {
       ];
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: rm.panel,
-        border: Border.all(color: rm.border),
-        borderRadius: BorderRadius.circular(RmTokens.rLg),
-      ),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+    return EditorWaveformPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -3629,6 +3604,7 @@ class _ManualRefineOverlayState extends State<_ManualRefineOverlay> {
             segments: ai.segments,
             duration: ai.durationSec,
             onZoom: _zoom,
+            onViewportWidth: (width) => _zoomWidth = width,
             windowStart: _zoomStart,
             windowEnd: _zoomEnd,
             accent: acc.base,
@@ -3637,11 +3613,13 @@ class _ManualRefineOverlayState extends State<_ManualRefineOverlay> {
             locked: false,
             playhead: state.playhead,
             onPlace: onPlace,
+            onSeek: widget.onSeek,
             onQuickConfirm: onConfirm,
           ),
           const SizedBox(height: 8),
           WaveformOverview(
             key: const ValueKey('manual-waveform-overview'),
+            height: 32,
             bars: bars,
             duration: ai.durationSec,
             windowStart: _zoomStart,
@@ -3657,24 +3635,16 @@ class _ManualRefineOverlayState extends State<_ManualRefineOverlay> {
     ).tourAnchor('waveform');
   }
 
-  Widget _transportTrailing(BuildContext context) {
-    return Wrap(
-      spacing: 6,
-      runSpacing: 4,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        RmButton(
-          key: const ValueKey('manual-use-playhead'),
-          onPressed: widget.onMarkPlayback,
-          size: RmButtonSize.sm,
-          label: '取播放位置',
-        ),
-        _manualAuditionButton(context),
-        const AuditionSettingsButton(compact: true).tourAnchor('audition'),
-        if (session.kind.isLoop) _endpointToggle(context),
-      ],
-    );
-  }
+  List<Widget> _transportActions(BuildContext context) => [
+    RmButton(
+      key: const ValueKey('manual-use-playhead'),
+      onPressed: widget.onMarkPlayback,
+      label: '取播放位置',
+    ),
+    _manualAuditionButton(context),
+    const AuditionSettingsButton(compact: true).tourAnchor('audition'),
+    if (session.kind.isLoop) _endpointToggle(context),
+  ];
 
   Widget _manualAuditionButton(BuildContext context) {
     final isLoop = session.kind.isLoop;
@@ -3683,7 +3653,7 @@ class _ManualRefineOverlayState extends State<_ManualRefineOverlay> {
         isLoop ? 'manual-refine-loop-preview' : 'manual-refine-point-preview',
       ),
       onPressed: onAudition,
-      size: RmButtonSize.sm,
+      size: RmButtonSize.md,
       leading: RmIcon(isLoop ? 'loop' : 'play', size: 12),
       label: isLoop ? '试听拼接' : '试听',
     );
@@ -3716,6 +3686,7 @@ class _ManualRefineOverlayState extends State<_ManualRefineOverlay> {
     }
 
     return Container(
+      height: 32,
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
         color: rm.raised,
@@ -3868,30 +3839,12 @@ class _ManualRefineOverlayState extends State<_ManualRefineOverlay> {
     String plus, {
     required bool beatUnit,
   }) {
-    final rm = context.rm;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        RmButton(
-          repeat: true,
-          tooltip: '长按约 0.5 秒后连续调整，松开即停止',
-          onPressed: () => onNudge(target, -delta),
-          size: RmButtonSize.sm,
-          label: minus,
-        ),
-        const SizedBox(width: 4),
-        RmButton(
-          repeat: true,
-          tooltip: '长按约 0.5 秒后连续调整，松开即停止',
-          onPressed: () => onNudge(target, delta),
-          size: RmButtonSize.sm,
-          label: plus,
-        ),
-        if (!beatUnit) ...[
-          const SizedBox(width: 5),
-          Text('ms', style: RmText.mono(11, color: rm.fg4)),
-        ],
-      ],
+    return EditorNudgePair(
+      minus: minus,
+      plus: plus,
+      unit: beatUnit ? null : 'ms',
+      onMinus: () => onNudge(target, -delta),
+      onPlus: () => onNudge(target, delta),
     );
   }
 
@@ -4214,51 +4167,12 @@ class _ManualRefineOverlayState extends State<_ManualRefineOverlay> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
           child: Row(
             children: [
-              RmIcon('info', size: 14, color: rm.fg3),
-              const SizedBox(width: 8),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final hints in [
-                      widget.shortcutHint.split(' · ').take(4),
-                      widget.shortcutHint.split(' · ').skip(4),
-                    ])
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          children: [
-                            for (final hint in hints)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 3,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: rm.raised,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  hint,
-                                  style: RmText.sans(11, color: rm.fg2),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                  ],
+                child: EditorShortcutHints(
+                  hints: widget.shortcutHint.split(' · '),
                 ),
               ),
               const SizedBox(width: 12),
-              RmButton(
-                onPressed: widget.onUndo,
-                label: '撤销',
-                tooltip: '撤销本次精修操作',
-              ),
-              const SizedBox(width: 8),
               RmButton(onPressed: onCancel, label: '取消'),
               const SizedBox(width: 10),
               RmButton(

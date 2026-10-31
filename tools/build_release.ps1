@@ -76,7 +76,7 @@ function Get-AppReleaseId {
 function Test-ReleaseBranchName {
   param([string]$BranchName)
   $normalized = $BranchName.Trim()
-  return $normalized -match '(?i)^release/v\d+\.\d+\.\d+(-rc\.\d+)?$'
+  return $normalized -match '(?i)^release/v\d+\.\d+\.\d+(-(rc|preview)\.\d+)?$'
 }
 
 function Get-BranchName {
@@ -291,7 +291,7 @@ function New-ReleaseArchive {
 
   $name = $ArchiveName
   if (-not $name) {
-    $name = "FHRadioStudio-$ReleaseId-windows-x64-$stamp.zip"
+    $name = "FH-Audio-Studio-$ReleaseId-windows-x64-$stamp.zip"
   }
   if (-not $name.EndsWith(".zip", [System.StringComparison]::OrdinalIgnoreCase)) {
     $name = "$name.zip"
@@ -324,7 +324,7 @@ function New-ReleaseArchive {
   return $archivePath
 }
 
-Write-Host "FH Radio Studio Windows release packaging"
+Write-Host "FH Audio Studio Windows release packaging"
 Write-Host "Repo: $RepoRoot"
 
 Add-LoopbackProxyBypass

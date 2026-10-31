@@ -14,11 +14,13 @@ class RmBanner extends StatelessWidget {
     required this.kind,
     required this.title,
     required this.body,
+    this.action,
   });
 
   final RmBannerKind kind;
   final String title;
   final String body;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +49,9 @@ class RmBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(RmTokens.rMd),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: action == null
+            ? CrossAxisAlignment.start
+            : CrossAxisAlignment.center,
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 1),
@@ -68,6 +72,7 @@ class RmBanner extends StatelessWidget {
               ),
             ),
           ),
+          if (action != null) ...[const SizedBox(width: 12), action!],
         ],
       ),
     );

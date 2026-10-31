@@ -106,7 +106,7 @@ void main() {
       expect(c.state[EditorAction.manualTl]!.label, 'Ctrl + 3');
       expect(c.state[EditorAction.manualPl]!.label, 'Ctrl + F8');
       c.save(c.state);
-      expect(prefs.getInt('editor.shortcuts.version'), 9);
+      expect(prefs.getInt('editor.shortcuts.version'), 10);
       expect(
         EditorShortcutController(prefs).state[EditorAction.manualPl]!.label,
         'Ctrl + F8',

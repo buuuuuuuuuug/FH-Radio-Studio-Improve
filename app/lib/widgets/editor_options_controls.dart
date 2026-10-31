@@ -1,3 +1,4 @@
+import 'setting_toggle_row.dart';
 import 'feature_tour.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -24,47 +25,11 @@ class EditorOptionsControls extends ConsumerWidget {
       bool value,
       ValueChanged<bool> change,
     ) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: RmText.sans(
-                      12.5,
-                      weight: FontWeight.w500,
-                      color: rm.fg,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(description, style: RmText.sans(11.5, color: rm.fg3)),
-                ],
-              ),
-            ),
-            const SizedBox(width: 16),
-            SizedBox(
-              width: 40,
-              height: 24,
-              child: FittedBox(
-                child: Switch(
-                  value: value,
-                  onChanged: change,
-                  activeThumbColor: rm.panel,
-                  activeTrackColor: rm.accent.base,
-                  inactiveThumbColor: rm.fg4,
-                  inactiveTrackColor: rm.raised,
-                  trackOutlineColor: WidgetStateProperty.all(rm.border),
-                ),
-              ),
-            ),
-          ],
-        ),
+      return SettingToggleRow(
+        title: title,
+        description: description,
+        value: value,
+        onChanged: change,
       );
     }
 

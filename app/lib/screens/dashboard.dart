@@ -1,8 +1,11 @@
+import '../core/deployment_preview.dart';
+import '../widgets/deployment_dialog.dart';
+import '../widgets/studio_modal.dart';
+import '../state/unsaved_edits.dart';
 import '../widgets/feature_tour.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import '../core/game_deployment_target.dart';
 import '../widgets/editor_options_controls.dart';
 import '../widgets/seamless_loop_options.dart';
 import '../widgets/split_playlist_setting.dart';
@@ -356,6 +359,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     BuildContext context,
     StudioController c,
   ) async {
+    if (!await ref.read(unsavedEditsProvider).confirmForBuild(context) ||
+        !context.mounted) {
+      return;
+    }
     final preview = c.buildPackageLoudnessPreview();
     final buildPlan = ref.read(effectivePlaylistPlanProvider);
     var buildQuality = 50;
@@ -473,12 +480,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       );
       return;
     }
-    final target = await showDialog<GameDeploymentTarget>(
+    final target = await showDialog<DeploymentChoice>(
       context: context,
       barrierColor: RmTokens.modalBackdrop,
-      builder: (context) => _DeployPreflightDialog(state: s),
+      builder: (context) => _DeployPreflightDialog(
+        state: s,
+        loadFiles: (target, excluded) =>
+            c.previewPackageDeployment(target: target, excludedFiles: excluded),
+      ),
     );
-    if (target != null) await c.deployLastPackage(target: target);
+    if (target != null) {
+      await c.deployLastPackage(
+        target: target.target,
+        excludedFiles: target.excludedFiles,
+      );
+    }
   }
 
   Future<void> _confirmCreatePristineBaseline(
@@ -677,20 +693,32 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     StudioController c, {
     required bool pending,
   }) async {
-    final target = await showDialog<GameDeploymentTarget>(
+    final target = await showDialog<DeploymentChoice>(
       context: context,
       barrierColor: RmTokens.modalBackdrop,
       builder: (context) => _DeployPreflightDialog(
         state: ref.read(studioProvider),
         force: true,
         pending: pending,
+        loadFiles: (target, excluded) => c.previewPackageDeployment(
+          target: target,
+          excludedFiles: excluded,
+          force: true,
+          pending: pending,
+        ),
       ),
     );
     if (target == null) return;
     if (pending) {
-      await c.deployPendingPackage(target: target);
+      await c.deployPendingPackage(
+        target: target.target,
+        excludedFiles: target.excludedFiles,
+      );
     } else {
-      await c.deployOldPackage(target: target);
+      await c.deployOldPackage(
+        target: target.target,
+        excludedFiles: target.excludedFiles,
+      );
     }
   }
 
@@ -1111,7 +1139,7 @@ class _DashboardModel {
       ),
       _DashboardScenario.noBaseline => TextSpan(
         text:
-            'FH Radio Studio 需要先记录原始 FH6 文件，后续才能判断”官方文件 / 准备包 / 新游戏文件”。创建原始备份不会修改游戏。',
+            'FH Audio Studio 需要先记录原始 FH6 文件，后续才能判断”官方文件 / 准备包 / 新游戏文件”。创建原始备份不会修改游戏。',
       ),
       _DashboardScenario.baselineBroken => TextSpan(
         text: '${s.baselineWorkflowLockMessage} 在修复前，写入和强制恢复都会保持锁定。',
@@ -1122,7 +1150,7 @@ class _DashboardModel {
             'Steam build 已变化，且受保护文件和已有记录不一致。先保存当前游戏文件，再决定是否基于它生成测试准备包。',
       ),
       _DashboardScenario.conflict => TextSpan(
-        text: '文件扫描显示当前游戏文件不属于原始备份、准备包或上次写入包。FH Radio Studio 不会自动覆盖，先查看路线再决定。',
+        text: '文件扫描显示当前游戏文件不属于原始备份、准备包或上次写入包。FH Audio Studio 不会自动覆盖，先查看路线再决定。',
       ),
       _DashboardScenario.pending => TextSpan(
         text: s.pendingPackageBuildFailed
@@ -1162,13 +1190,13 @@ class _DashboardModel {
       _DashboardScenario.conflict ||
       _DashboardScenario.gameUpdate ||
       _DashboardScenario.pending =>
-        'FH Radio Studio 不会自动覆盖：除非你明确选择写回或写入，否则不会触碰这些文件。',
+        'FH Audio Studio 不会自动覆盖：除非你明确选择写回或写入，否则不会触碰这些文件。',
       _DashboardScenario.confirmation =>
         '这是确认状态，不是重新构建：当前命中的版本已明确，下一步只是在确认或回退之间选择。',
       _DashboardScenario.blocking =>
         'AI Provider 降级不会触发阻塞；只有 uv / Python / 核心音频工具缺失才锁主流程。',
       _DashboardScenario.gameDirMissing =>
-        '只要游戏目录不存在，FH Radio Studio 就无法读取游戏文件状态；游戏路径填错或游戏未安装均会触发此锁。工具链本身不受影响。',
+        '只要游戏目录不存在，FH Audio Studio 就无法读取游戏文件状态；游戏路径填错或游戏未安装均会触发此锁。工具链本身不受影响。',
       _ => null,
     };
 
@@ -5343,7 +5371,7 @@ class _ChecklistDialogState extends State<_ChecklistDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _ModalHead(
+            StudioModalHead(
               title: widget.title,
               eyebrow: widget.danger ? 'DANGER CHECK' : 'CHECKLIST',
               overline: widget.danger ? '危险操作' : '安全确认',
@@ -5369,7 +5397,7 @@ class _ChecklistDialogState extends State<_ChecklistDialog> {
                     child: Column(
                       children: [
                         for (int i = 0; i < widget.checks.length; i++)
-                          _ChecklistItem(
+                          StudioChecklistItem(
                             label: widget.checks[i],
                             value: _checks[i],
                             onChanged: (v) => setState(() => _checks[i] = v),
@@ -5381,7 +5409,7 @@ class _ChecklistDialogState extends State<_ChecklistDialog> {
                 ],
               ),
             ),
-            _ModalFoot(
+            StudioModalFoot(
               action: widget.action,
               danger: widget.danger,
               enabled: _ready,
@@ -5395,462 +5423,37 @@ class _ChecklistDialogState extends State<_ChecklistDialog> {
 }
 
 @visibleForTesting
-Widget deploymentDialogForTesting(StudioState state) =>
-    _DeployPreflightDialog(state: state);
+Widget deploymentDialogForTesting(
+  StudioState state, {
+  DeploymentPreviewLoader? loadFiles,
+}) => _DeployPreflightDialog(
+  state: state,
+  loadFiles: loadFiles ?? (_, _) async => const DeploymentPreview(writes: []),
+);
 
-class _DeployPreflightDialog extends StatefulWidget {
+class _DeployPreflightDialog extends StatelessWidget {
   const _DeployPreflightDialog({
     required this.state,
+    required this.loadFiles,
     this.force = false,
     this.pending = false,
   });
-
   final StudioState state;
-  final bool force;
-  final bool pending;
+  final DeploymentPreviewLoader loadFiles;
+  final bool force, pending;
 
   @override
-  State<_DeployPreflightDialog> createState() => _DeployPreflightDialogState();
-}
-
-class _DeployPreflightDialogState extends State<_DeployPreflightDialog> {
-  GameDeploymentTarget _target = GameDeploymentTarget.mediapc;
-  late bool _exit = !widget.state.gameRunning;
-  bool _latest = false;
-  bool _modify = false;
-
-  bool get _ready =>
-      (widget.force
-          ? (widget.pending
-                ? widget.state.pendingPackageReady
-                : widget.state.lastPackageDir != null)
-          : widget.state.currentPackageReady) &&
-      !widget.state.baselineIntegrityBroken &&
-      _exit &&
-      _latest &&
-      _modify;
-
-  @override
-  Widget build(BuildContext context) {
-    final rm = context.rm;
-    final s = widget.state;
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 48, vertical: 36),
-      child: Container(
-        width: 560,
-        decoration: BoxDecoration(
-          color: rm.panel,
-          border: Border.all(color: rm.border),
-          borderRadius: BorderRadius.circular(RmTokens.rXl),
-          boxShadow: RmTokens.modal,
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _ModalHead(
-              title: widget.force
-                  ? (widget.pending ? '写入测试准备包' : '写入旧准备包')
-                  : '写入游戏前请确认',
-              eyebrow: 'PRE-FLIGHT',
-              overline: '写入前检查',
-              icon: 'export',
-            ),
-            Flexible(
-              child: SingleChildScrollView(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(22, 0, 22, 18),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        '选择电台包的写入位置，然后确认下面三项。',
-                        style: RmText.sans(13, color: rm.fg2, height: 1.55),
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _targetOption(
-                              context,
-                              GameDeploymentTarget.mediapc,
-                              'mediapc（默认）',
-                              '不覆盖游戏原文件，不受更新影响',
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _targetOption(
-                              context,
-                              GameDeploymentTarget.media,
-                              'media（覆盖原文件）',
-                              '覆盖游戏原文件，游戏更新可能恢复',
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: rm.raised,
-                          border: Border.all(color: rm.border),
-                          borderRadius: BorderRadius.circular(RmTokens.rMd),
-                        ),
-                        child: Column(
-                          children: [
-                            _ChecklistItem(
-                              label: 'FH6 已退出（包括 Steam 后台 / 云同步队列）',
-                              value: _exit,
-                              onChanged: (v) => setState(() => _exit = v),
-                            ),
-                            _ChecklistItem(
-                              label: widget.force
-                                  ? '确认写入所选准备包，用于测试当前游戏版本'
-                                  : '写入的是最近准备好的电台包',
-                              value: _latest,
-                              onChanged: (v) => setState(() => _latest = v),
-                            ),
-                            _ChecklistItem(
-                              label: '理解这会修改本地游戏文件，上次写入指纹会在成功后更新',
-                              value: _modify,
-                              onChanged: (v) => setState(() => _modify = v),
-                              last: true,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      _ModalFacts(
-                        rows: [
-                          ('写入位置', p.join(s.gameDir, _target.directoryName)),
-                          (
-                            '电台包',
-                            (widget.pending
-                                    ? s.pendingPackageDeployDir
-                                    : s.lastPackageDeployDir) ??
-                                '还没有准备电台包',
-                          ),
-                          ('写入指纹', s.lastAppliedPackageManifest),
-                          (
-                            '受影响文件',
-                            '${math.max(s.fileIntegrity.packageFiles, s.fileIntegrity.checkedFiles)} 个保护文件',
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            _ModalFoot(
-              action: '确认写入',
-              danger: false,
-              enabled: _ready,
-              icon: 'export',
-              onConfirm: () => Navigator.of(context).pop(_target),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _targetOption(
-    BuildContext context,
-    GameDeploymentTarget target,
-    String title,
-    String subtitle,
-  ) {
-    final rm = context.rm;
-    final selected = _target == target;
-    return Semantics(
-      key: ValueKey('deploy-choice-${target.directoryName}'),
-      selected: selected,
-      button: true,
-      child: Material(
-        color: selected ? rm.accent.bg : rm.raised,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(RmTokens.rMd),
-          side: BorderSide(color: selected ? rm.accent.ring : rm.border),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          key: ValueKey('deploy-target-${target.directoryName}'),
-          onTap: () => setState(() => _target = target),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                RmIcon(
-                  selected ? 'check' : 'folder',
-                  size: 16,
-                  color: selected ? rm.accent.base : rm.fg3,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        title,
-                        style: RmText.sans(
-                          12,
-                          weight: FontWeight.w600,
-                          color: selected ? rm.accent.base : rm.fg,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(subtitle, style: RmText.sans(11, color: rm.fg3)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ModalHead extends StatelessWidget {
-  const _ModalHead({
-    required this.title,
-    required this.eyebrow,
-    this.overline,
-    this.icon = 'check',
-    this.danger = false,
-  });
-
-  final String title;
-  final String eyebrow;
-  final String? overline;
-  final String icon;
-  final bool danger;
-
-  @override
-  Widget build(BuildContext context) {
-    final rm = context.rm;
-    final tone = danger ? rm.danger : rm.accent.base;
-    final toneBg = danger ? rm.dangerBg : rm.accent.bg;
-    final toneBorder = danger ? rm.danger.withAlpha(77) : rm.accent.ring;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 20, 16, 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: toneBg,
-              border: Border.all(color: toneBorder),
-              borderRadius: BorderRadius.circular(RmTokens.rMd),
-            ),
-            child: RmIcon(icon, size: 18, color: tone),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (overline != null) ...[
-                      Text(
-                        overline!,
-                        style: RmText.sans(
-                          11,
-                          color: tone,
-                          weight: FontWeight.w600,
-                        ),
-                      ),
-                      Container(
-                        width: 3,
-                        height: 3,
-                        margin: const EdgeInsets.symmetric(horizontal: 8),
-                        decoration: BoxDecoration(
-                          color: tone.withAlpha(150),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ],
-                    Text(
-                      eyebrow,
-                      style: RmText.mono(
-                        10.5,
-                        color: tone,
-                        weight: FontWeight.w500,
-                        letterSpacing: 0,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  title,
-                  style: RmText.sans(17, color: rm.fg, weight: FontWeight.w700),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          RmButton.icon(
-            onPressed: () => Navigator.of(context).pop(),
-            icon: const RmIcon('x', size: 13),
-            variant: RmButtonVariant.ghost,
-            tooltip: '关闭',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ModalFoot extends StatelessWidget {
-  const _ModalFoot({
-    required this.action,
-    required this.danger,
-    required this.enabled,
-    required this.onConfirm,
-    this.icon = 'check',
-  });
-
-  final String action;
-  final bool danger;
-  final bool enabled;
-  final String icon;
-  final VoidCallback onConfirm;
-
-  @override
-  Widget build(BuildContext context) {
-    final rm = context.rm;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(22, 12, 22, 14),
-      decoration: BoxDecoration(
-        color: rm.raised,
-        border: Border(top: BorderSide(color: rm.border)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          RmButton(
-            onPressed: () => Navigator.of(context).pop(),
-            label: '取消',
-            size: RmButtonSize.sm,
-          ),
-          const SizedBox(width: 8),
-          RmButton(
-            onPressed: enabled ? onConfirm : null,
-            label: action,
-            leading: RmIcon(icon, size: 12),
-            size: RmButtonSize.sm,
-            variant: danger
-                ? RmButtonVariant.dangerPrimary
-                : RmButtonVariant.primary,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ChecklistItem extends StatelessWidget {
-  const _ChecklistItem({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-    this.last = false,
-  });
-
-  final String label;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  final bool last;
-
-  @override
-  Widget build(BuildContext context) {
-    final rm = context.rm;
-    return InkWell(
-      onTap: () => onChanged(!value),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          border: last ? null : Border(bottom: BorderSide(color: rm.border)),
-        ),
-        child: Row(
-          children: [
-            Checkbox(
-              value: value,
-              onChanged: (v) => onChanged(v ?? false),
-              activeColor: rm.accent.base,
-              side: BorderSide(color: rm.borderStrong),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(label, style: RmText.sans(13, color: rm.fg)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ModalFacts extends StatelessWidget {
-  const _ModalFacts({required this.rows});
-
-  final List<(String, String)> rows;
-
-  @override
-  Widget build(BuildContext context) {
-    final rm = context.rm;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: rm.bg,
-        border: Border.all(color: rm.border),
-        borderRadius: BorderRadius.circular(RmTokens.rMd),
-      ),
-      child: Column(
-        children: [
-          for (final row in rows)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 78,
-                    child: Text(
-                      row.$1,
-                      style: RmText.mono(
-                        10.5,
-                        color: rm.fg3,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      row.$2,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: RmText.mono(11.5, color: rm.fg2, letterSpacing: 0),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => DeploymentConfirmationDialog(
+    gameDir: state.gameDir,
+    gameRunning: state.gameRunning,
+    loadFiles: loadFiles,
+    packageReady: force
+        ? (pending ? state.pendingPackageReady : state.lastPackageDir != null)
+        : state.currentPackageReady,
+    baselineIntegrityBroken: state.baselineIntegrityBroken,
+    title: force ? (pending ? '写入测试准备包' : '写入旧准备包') : '写入游戏前请确认',
+    latestConfirmation: force ? '确认写入所选准备包，用于测试当前游戏版本' : '写入的是最近准备好的电台包',
+  );
 }
 
 bool _dashboardScanning(StudioState s) {
@@ -6662,7 +6265,7 @@ bool _looksLikePathValue(String value) {
 String _md5ReportText(StudioState s) {
   final i = s.fileIntegrity;
   return [
-    'FH Radio Studio 文件校验报告',
+    'FH Audio Studio 文件校验报告',
     '状态: ${i.title}',
     '详情: ${i.detail}',
     '已校验: ${i.checkedFiles}',
@@ -6678,7 +6281,7 @@ String _md5ReportText(StudioState s) {
 
 String _diagnosticSnapshot(StudioState s) {
   return [
-    'FH Radio Studio dashboard diagnostic snapshot',
+    'FH Audio Studio dashboard diagnostic snapshot',
     'busy=${s.busy} label=${s.busyLabel ?? ''}',
     'cli_calls=${_diagnosticCallCount(s.log)}',
     'toolchain=${s.toolchainStatus.status} ${aiProfileUserText(s.toolchainStatus.summary)}',

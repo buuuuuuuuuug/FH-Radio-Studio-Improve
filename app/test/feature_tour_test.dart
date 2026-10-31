@@ -196,7 +196,11 @@ void main() {
                   const SizedBox(height: 1400),
                   const TourAnchor(
                     'help',
-                    child: SizedBox(height: 80, width: 260),
+                    child: SizedBox(
+                      key: ValueKey('distant-tour-target'),
+                      height: 80,
+                      width: 260,
+                    ),
                   ),
                   const SizedBox(height: 500),
                 ],
@@ -217,6 +221,11 @@ void main() {
       );
       t.view.physicalSize = const Size(360, 280);
       await t.pumpAndSettle();
+      final revealed = t.getRect(
+        find.byKey(const ValueKey('distant-tour-target')),
+      );
+      expect(revealed.top, greaterThanOrEqualTo(0));
+      expect(revealed.bottom, lessThanOrEqualTo(280));
       expect(t.takeException(), isNull);
       await t.ensureVisible(find.text('知道了'));
       await t.tap(find.text('知道了'));

@@ -1,7 +1,7 @@
 name: fh_radio_studio
-description: "FH Radio Studio - third-party FH radio editor for PC"
+description: "FH Audio Studio - music, radio and voice editing for FH6"
 publish_to: 'none'
-version: 0.2.1-preview.4+88
+version: 1.0.0-preview.1+90
 
 environment:
   sdk: ^3.10.7

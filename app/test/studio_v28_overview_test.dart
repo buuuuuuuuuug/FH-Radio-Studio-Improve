@@ -159,7 +159,7 @@ void main() {
       final overview = find.byKey(const ValueKey('manual-waveform-overview'));
       await Scrollable.ensureVisible(t.element(overview), alignment: .5);
       await t.pumpAndSettle();
-      expect(t.getSize(overview).height, 38);
+      expect(t.getSize(overview).height, 32);
       expect(t.getRect(overview).left, greaterThanOrEqualTo(0));
       expect(t.getRect(overview).right, lessThanOrEqualTo(width));
       expect(t.takeException(), isNull);

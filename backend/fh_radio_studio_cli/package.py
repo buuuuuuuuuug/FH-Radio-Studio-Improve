@@ -482,6 +482,15 @@ def _package_progress_plan(
                     prepare_processes=prepare_processes,
                 )
             )
+    if getattr(args, "_stinger_snapshot", None) is not None:
+        steps.append(
+            _progress_step(
+                "stinger_banks",
+                "合并并校验台呼",
+                "保留未替换音频，重构台呼并核对共享 RadioInfo。",
+                weight=4,
+            )
+        )
     if args.source or args.target:
         steps.append(
             _progress_step(
@@ -511,7 +520,9 @@ def _package_progress_plan(
     return steps
 
 
-def collect_package_deploy_files(package_dir: Path) -> List[Dict[str, object]]:
+def collect_package_deploy_files(
+    package_dir: Path, *, require_files: bool = True
+) -> List[Dict[str, object]]:
     package_root = package_root_dir(package_dir)
     package_audio = package_root / "media" / "audio"
     files: List[Dict[str, object]] = []
@@ -541,8 +552,12 @@ def collect_package_deploy_files(package_dir: Path) -> List[Dict[str, object]]:
                     ).replace("\\", "/"),
                 }
             )
-    if not files:
-        die(f"No deployable package files found in {package_root}")
+    if not files and require_files:
+        manifest_path = package_root / "fh_radio_studio_package_manifest.json"
+        manifest = load_manifest(manifest_path) if manifest_path.is_file() else {}
+        delta = manifest.get("package_delta") or {}
+        if not (delta.get("mode") == "changed_files" and delta.get("no_changes") is True):
+            die(f"No deployable package files found in {package_root}")
     return files
 
 
@@ -566,7 +581,9 @@ def _package_game_version_fields(game_dir: Path) -> Dict[str, object]:
     return fields
 
 
-def package_file_fingerprints(package_dir: Path) -> List[Dict[str, object]]:
+def package_file_fingerprints(
+    package_dir: Path, *, require_files: bool = True
+) -> List[Dict[str, object]]:
     project_dir = _project_dir_from_package_manifest(
         package_dir / "fh_radio_studio_package_manifest.json"
     )
@@ -583,7 +600,7 @@ def package_file_fingerprints(package_dir: Path) -> List[Dict[str, object]]:
             "size": file_size(src),
             "md5": md5_file(src),
         }
-        for item in collect_package_deploy_files(package_dir)
+        for item in collect_package_deploy_files(package_dir, require_files=require_files)
         for src in [Path(str(item["source"]))]
     ]
 
@@ -621,6 +638,8 @@ def _baseline_install_relative_path(item: Dict[str, object]) -> str:
 def complete_package_from_baseline(
     package_root: Path,
     baseline_manifest: Optional[str],
+    *,
+    scoped_radios: Optional[set[int]] = None,
 ) -> Optional[Dict[str, object]]:
     if not baseline_manifest:
         return None
@@ -643,8 +662,15 @@ def complete_package_from_baseline(
             continue
         if not install_rel or install_rel == "UserPreferredLang":
             continue
-        files += 1
         dest = contained_game_path(package_root, install_rel)
+        if scoped_radios is not None and not dest.exists():
+            name = Path(install_rel).name
+            if not any(
+                name.startswith(f"R{radio}_Tracks_") and name.endswith(".assets.bank")
+                for radio in scoped_radios
+            ):
+                continue
+        files += 1
         if dest.exists():
             kept += 1
             continue
@@ -683,9 +709,17 @@ def apply_baseline_completion(
     package_root: Path,
     args: argparse.Namespace,
 ) -> None:
+    scoped_radios = None
+    if getattr(args, "_stinger_snapshot", None) is not None:
+        scoped_radios = {
+            int(unit["radio"])
+            for unit in package_manifest.get("radios", [])
+            if unit.get("radio") is not None
+        }
     completion = complete_package_from_baseline(
         package_root,
         getattr(args, "baseline_manifest", None),
+        scoped_radios=scoped_radios,
     )
     if completion is None:
         return
@@ -3123,6 +3157,10 @@ def cmd_build_package(args: argparse.Namespace) -> int:
             progress,
         )
     if not args.music:
+        if getattr(args, "_stinger_snapshot", None) is not None:
+            from .stingers import build_base_package
+
+            return build_base_package(args, audio_dir)
         if args.source or args.target:
             return cmd_build_current_radio_package(
                 args, game_dir, audio_dir, radio_info, root, progress

@@ -1,3 +1,4 @@
+import '../../core/waveform_zoom.dart';
 import '../../core/playback_window.dart';
 import 'dart:async';
 import '../../state/seamless_loop_state.dart';
@@ -314,6 +315,7 @@ class ReplaceEditorNotifier extends StateNotifier<ReplaceEditorState> {
   final Ref ref;
   final AudioAnalysisController _analysisController;
   final List<ReplaceEditorState> _history = [];
+  final List<ReplaceEditorState> _redoHistory = [];
   bool Function()? pendingManualDirty;
   VoidCallback? commitManualDraft;
   VoidCallback? discardManualDraft;
@@ -933,38 +935,25 @@ class ReplaceEditorNotifier extends StateNotifier<ReplaceEditorState> {
     };
   }
 
+  double waveformViewportWidth = 800;
+  double get _minimumZoom => minimumWaveformSpan(
+    duration: state.ai.durationSec,
+    bins: state.ai.waveformPeaks.isEmpty ? 512 : state.ai.waveformPeaks.length,
+    width: waveformViewportWidth,
+  );
   void zoomByFactor(double factor) {
     final duration = state.ai.durationSec;
     if (duration <= 0 || !factor.isFinite || factor <= 0) return;
     _setZoomWidth(
       ((state.zoomEnd - state.zoomStart) * factor).clamp(
-        math.min(8.0, duration),
+        _minimumZoom,
         duration,
       ),
     );
   }
 
-  void zoomIn() {
-    final minWidth = math.min(8.0, state.ai.durationSec);
-    final width = (state.zoomEnd - state.zoomStart)
-        .clamp(minWidth, state.ai.durationSec)
-        .toDouble();
-    final nextWidth = (width * 0.65)
-        .clamp(minWidth, state.ai.durationSec)
-        .toDouble();
-    _setZoomWidth(nextWidth);
-  }
-
-  void zoomOut() {
-    final minWidth = math.min(8.0, state.ai.durationSec);
-    final width = (state.zoomEnd - state.zoomStart)
-        .clamp(minWidth, state.ai.durationSec)
-        .toDouble();
-    final nextWidth = (width * 1.55)
-        .clamp(minWidth, state.ai.durationSec)
-        .toDouble();
-    _setZoomWidth(nextWidth);
-  }
+  void zoomIn() => zoomByFactor(.65);
+  void zoomOut() => zoomByFactor(1.55);
 
   void _setZoomWidth(double width) {
     final center = state.playhead.clamp(0, state.ai.durationSec);
@@ -983,6 +972,7 @@ class ReplaceEditorNotifier extends StateNotifier<ReplaceEditorState> {
 
   void undo() {
     if (_history.isEmpty) return;
+    _redoHistory.add(state);
     state = _history.removeLast();
   }
 
@@ -1006,7 +996,14 @@ class ReplaceEditorNotifier extends StateNotifier<ReplaceEditorState> {
     return config;
   }
 
+  void redo() {
+    if (_redoHistory.isEmpty) return;
+    _history.add(state);
+    state = _redoHistory.removeLast();
+  }
+
   void _remember() {
+    _redoHistory.clear();
     _history.add(state);
     if (_history.length > 40) _history.removeAt(0);
   }

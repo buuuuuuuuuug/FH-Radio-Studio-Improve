@@ -1,7 +1,9 @@
 import 'dart:async';
+import '../core/audio_import_error.dart';
 import 'dart:convert';
 import 'dart:io';
 import '../core/game_deployment_target.dart';
+import '../core/deployment_preview.dart';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
@@ -24,6 +26,7 @@ import '../core/track_metadata_cache.dart';
 import '../core/track_timing_config.dart';
 import '../domain/radio_library.dart';
 import 'app_state.dart';
+import 'unsaved_edits.dart';
 
 class _StudioPrefsKeys {
   static const repoRoot = 'rm.studio.repoRoot';
@@ -1329,9 +1332,14 @@ class StudioState {
   });
 
   factory StudioState.initial(SharedPreferences prefs) {
-    final repoRoot =
-        prefs.getString(_StudioPrefsKeys.repoRoot) ??
-        FhRadioStudioCli.defaultRepoRoot();
+    final localSource = localDevelopmentConfig()['source_root'];
+    final configuredLocalSource =
+        localSource is String &&
+        File(p.join(localSource, 'pyproject.toml')).existsSync();
+    final repoRoot = configuredLocalSource
+        ? FhRadioStudioCli.defaultRepoRoot()
+        : prefs.getString(_StudioPrefsKeys.repoRoot) ??
+              FhRadioStudioCli.defaultRepoRoot();
     final storedProjectRaw = prefs.getString(_StudioPrefsKeys.projectDir);
     final storedProjectDir =
         storedProjectRaw == null || storedProjectRaw.trim().isEmpty
@@ -2718,6 +2726,7 @@ class StudioController extends StateNotifier<StudioState> {
   }
 
   final SharedPreferences _prefs;
+  bool Function()? hasUnsavedEdits;
   bool _startupFullCheckStarted = false;
   CliCancellationToken? _activeAiEnvironmentSyncToken;
   CliCancellationToken? _activePackageBuildToken;
@@ -3090,14 +3099,17 @@ class StudioController extends StateNotifier<StudioState> {
     return saved;
   }
 
-  Future<void> importMusicPaths(List<String> values) async {
-    if (state.busy) return;
+  Future<String?> importMusicPaths(List<String> values) async {
+    if (state.busy) return null;
     final inputs = values
         .map((value) => value.trim())
         .where((value) => value.isNotEmpty)
         .toList(growable: false);
-    if (inputs.isEmpty) return;
-    if (!await _ensureProjectPathMigratedForAction('导入自建歌曲')) return;
+    if (inputs.isEmpty) return null;
+    if (!await _ensureProjectPathMigratedForAction('导入自建歌曲')) {
+      return '导入未开始，请先完成工程路径检查。';
+    }
+    String? message;
     await _withBusy('导入自建歌曲', () async {
       final result = await _run([
         'import-audio',
@@ -3111,7 +3123,10 @@ class StudioController extends StateNotifier<StudioState> {
         '--json',
       ], streamOutput: false);
       if (!result.ok) {
-        _append('导入失败：音频无法复制或转码。');
+        final detail = audioImportErrorDetail(result.stderr);
+        message =
+            '歌曲导入失败：${detail.isEmpty ? '音频无法复制或转码，请检查文件格式、路径与文件占用。' : detail}';
+        _append(message!);
         return;
       }
       final payload = _decodeJsonObject(result.stdout, label: '导入结果');
@@ -3119,13 +3134,19 @@ class StudioController extends StateNotifier<StudioState> {
       final skipped = _jsonList(payload?['duplicates_skipped']).length;
       if (skipped > 0) _append('检测到 $skipped 首重复音频文件，已跳过；保留已有曲目和点位。');
       if (imported.isEmpty) {
-        _append(skipped > 0 ? '所选文件已在项目中，未重复添加。' : '没有找到可导入的音频文件。');
+        message = skipped > 0
+            ? '所选文件已在项目中，跳过 $skipped 首重复歌曲。'
+            : '没有找到可导入的音频文件。';
+        _append(message!);
         return;
       }
       await _refreshTrackMetadataCacheWithinBusy(allSources: true);
       setMusicPaths([...state.musicPaths, ...imported]);
-      _append('已导入 ${imported.length} 首到项目 sources。');
+      message =
+          '已导入 ${imported.length} 首歌曲${skipped > 0 ? '，跳过 $skipped 首重复歌曲' : ''}。';
+      _append(message!);
     });
+    return message;
   }
 
   Future<String?> importSirenTrack({
@@ -4320,8 +4341,13 @@ class StudioController extends StateNotifier<StudioState> {
     double loudnessOffsetLu = kDefaultPackageLoudnessOffsetLu,
     int quality = 50,
     PlaylistPlan? plan,
+    double? stingerGainDb,
   }) async {
     if (state.busy) return false;
+    if (hasUnsavedEdits?.call() == true) {
+      _append('存在未保存的修改。请保存歌曲、播放列表和台呼后再构建准备包。');
+      return false;
+    }
     if (!await _ensureProjectPathMigratedForAction('准备电台包')) {
       return false;
     }
@@ -4334,6 +4360,9 @@ class StudioController extends StateNotifier<StudioState> {
     }
     if (_rejectProjectEditWhenBaselineBroken('准备电台包')) return false;
     FhRadioStudioProject.ensure(state.projectDir);
+    final hasStingerDraft = File(
+      p.join(state.projectDir, '.fh-radio-studio', 'stingers.json'),
+    ).existsSync();
     if (_canCreatePendingPackage) {
       _append('当前游戏文件还没确认。请先在概览里保存新文件记录、生成测试准备包，或写回旧的基线；确认或放弃后再准备普通电台包。');
       return false;
@@ -4342,8 +4371,27 @@ class StudioController extends StateNotifier<StudioState> {
       _append('还没有可信原始备份，不能生成准备包。请先在概览里创建原始备份。');
       return false;
     }
-    var planForBuild = plan ?? const PlaylistPlan.empty();
-    if (!state.currentPackageReady && !planForBuild.hasDraft) {
+    final savedPlanExists = File(
+      PlaylistPlanStore.configPath(state.projectDir),
+    ).existsSync();
+    final explicitPlan = plan != null || savedPlanExists;
+    var planForBuild =
+        plan ??
+        (savedPlanExists
+            ? PlaylistPlanStore.read(state.projectDir)
+            : const PlaylistPlan.empty());
+    final stingerGain =
+        stingerGainDb ??
+        _objectDouble(
+          (readPackageManifest(state.lastPackageDir)?['stingers']
+              as Map?)?['gain_db'],
+        ) ??
+        0;
+    if (!stingerGain.isFinite || stingerGain < -6 || stingerGain > 6) {
+      _append('台呼统一增益需在 -6 至 +6 dB。');
+      return false;
+    }
+    if (!explicitPlan && !state.currentPackageReady && !planForBuild.hasDraft) {
       // CLI 才是 track metadata 的 true source：差分游戏与原始备份、把自建曲逆向
       // 匹配回项目源文件、重建播放列表草稿，都交给 reconstruct-plan 完成。结果直接
       // 从 stdout 读回内存（--out -），不落任何文件。
@@ -4403,8 +4451,12 @@ class StudioController extends StateNotifier<StudioState> {
     // 用户只改了响度增益、且没有正在编辑的草稿时，从当前包 manifest 的 assignments
     // 重建一份 plan（source 全部指向项目 sources/siren），再走正常的 --playlist-plan
     // 构建。不能从准备包目录读，因为输出目录就是它、构建前会被清空。
-    if (!planForBuild.hasDraft &&
-        (loudnessOffsetChanged || expansionChanged || qualityChanged) &&
+    if (!explicitPlan &&
+        !planForBuild.hasDraft &&
+        (loudnessOffsetChanged ||
+            expansionChanged ||
+            qualityChanged ||
+            hasStingerDraft) &&
         currentPackageSummary != null &&
         currentPackageSummary.assignments.isNotEmpty) {
       final seeded = _planFromPackageSummary(currentPackageSummary);
@@ -4441,12 +4493,14 @@ class StudioController extends StateNotifier<StudioState> {
           )
         : null;
     final canBuildFromPreviousApplied =
+        !explicitPlan &&
         !draft.hasPlan &&
         previousAppliedSummary != null &&
         previousAppliedSummary.assignments.isNotEmpty;
     if (!draft.hasPlan &&
         !canBuildLanguageChange &&
         !canBuildFromPreviousApplied &&
+        !hasStingerDraft &&
         !canBuildWithoutCurrentPackage) {
       if (state.currentPackageReady) {
         _append('准备包已经等于当前播放列表和响度；修改分配、语言或响度增益后再重新构建。');
@@ -4455,7 +4509,7 @@ class StudioController extends StateNotifier<StudioState> {
       }
       return false;
     }
-    final musicInputs = draft.hasPlan
+    final musicInputs = draft.hasPlan || explicitPlan
         ? draft.inputs
         : _musicInputsFromPackageSummary(previousAppliedSummary);
     final playlistFromPackage = canBuildFromPreviousApplied
@@ -4464,6 +4518,7 @@ class StudioController extends StateNotifier<StudioState> {
     if (musicInputs.isEmpty &&
         !canBuildLanguageChange &&
         !restoresBuiltin &&
+        !hasStingerDraft &&
         !canBuildWithoutCurrentPackage) {
       _append('播放列表草稿为空。请先在“播放列表”里分配至少一首自建歌曲。');
       return false;
@@ -4513,9 +4568,14 @@ class StudioController extends StateNotifier<StudioState> {
         _append('播放列表草稿为空；将把当前 radio 原样准备进包，并加入语言设置。');
       }
       final usePlanStdin =
+          explicitPlan ||
           draft.hasPlan && (musicInputs.isNotEmpty || restoresBuiltin);
       final result = await _runPackageBuild([
         'build-package',
+        '--stinger-project',
+        state.projectDir,
+        '--stinger-gain-db',
+        '$stingerGain',
         '--quality',
         '$quality',
         if (FhRadioStudioProject.readSettings(
@@ -4801,6 +4861,7 @@ class StudioController extends StateNotifier<StudioState> {
           radioCode: radioCode,
           playlistType: playlistType,
           slot: item.slotForPlaylist(playlistType),
+          projectDir: state.projectDir,
         );
       }
     }
@@ -5043,6 +5104,7 @@ class StudioController extends StateNotifier<StudioState> {
 
   Future<void> deployOldPackage({
     GameDeploymentTarget target = GameDeploymentTarget.mediapc,
+    Set<String> excludedFiles = const {},
   }) async {
     if (!await _ensureProjectPathMigratedForAction('写入旧准备包')) return;
     if (_rejectProjectEditWhenBaselineBroken('写入旧准备包')) return;
@@ -5052,12 +5114,18 @@ class StudioController extends StateNotifier<StudioState> {
       return;
     }
     await _withBusy('写入旧准备包', () async {
-      await _deployPackage(packageDir, force: true, target: target);
+      await _deployPackage(
+        packageDir,
+        force: true,
+        target: target,
+        excludedFiles: excludedFiles,
+      );
     });
   }
 
   Future<void> deployPendingPackage({
     GameDeploymentTarget target = GameDeploymentTarget.mediapc,
+    Set<String> excludedFiles = const {},
   }) async {
     if (!await _ensureProjectPathMigratedForAction('写入测试准备包')) return;
     if (_rejectProjectEditWhenBaselineBroken('写入测试准备包')) return;
@@ -5067,7 +5135,12 @@ class StudioController extends StateNotifier<StudioState> {
       return;
     }
     await _withBusy('写入测试准备包', () async {
-      await _deployPackage(packageDir, force: true, target: target);
+      await _deployPackage(
+        packageDir,
+        force: true,
+        target: target,
+        excludedFiles: excludedFiles,
+      );
     });
   }
 
@@ -5264,6 +5337,8 @@ class StudioController extends StateNotifier<StudioState> {
         state.gameDir,
         '--baseline-dir',
         baselineDir,
+        '--last-applied-manifest',
+        state.lastAppliedPackageManifest,
         '--yes',
       ]);
       if (result.ok) {
@@ -5357,6 +5432,7 @@ class StudioController extends StateNotifier<StudioState> {
   Future<void> deployLastPackage({
     bool force = false,
     GameDeploymentTarget target = GameDeploymentTarget.mediapc,
+    Set<String> excludedFiles = const {},
   }) async {
     if (state.busy) return;
     if (!await _ensureProjectPathMigratedForAction('写入游戏')) return;
@@ -5367,14 +5443,74 @@ class StudioController extends StateNotifier<StudioState> {
       return;
     }
     await _withBusy(force ? '强制部署包到游戏目录' : '部署包到游戏目录', () async {
-      await _deployPackage(packageDir, force: force, target: target);
+      await _deployPackage(
+        packageDir,
+        force: force,
+        target: target,
+        excludedFiles: excludedFiles,
+      );
     });
+  }
+
+  List<String> _packageDeploymentArgs(
+    String packageDir, {
+    required bool force,
+    required GameDeploymentTarget target,
+    Set<String> excludedFiles = const {},
+  }) => [
+    'deploy-package',
+    p.join(packageDir, 'package'),
+    '--game-dir',
+    state.gameDir,
+    '--target-root',
+    target.directoryName,
+    if (state.preferredPath.trim().isNotEmpty) ...[
+      '--preferred-path',
+      state.preferredPath,
+    ],
+    if (File(state.currentBaselineManifest).existsSync()) ...[
+      '--baseline-manifest',
+      state.currentBaselineManifest,
+    ],
+    '--last-applied-manifest',
+    state.lastAppliedPackageManifest,
+    if (force) '--force',
+    for (final id in excludedFiles) ...['--exclude-file', id],
+  ];
+
+  Future<DeploymentPreview> previewPackageDeployment({
+    GameDeploymentTarget target = GameDeploymentTarget.mediapc,
+    bool force = false,
+    bool pending = false,
+    Set<String> excludedFiles = const {},
+  }) async {
+    final packageDir = pending ? state.pendingPackageDir : state.lastPackageDir;
+    if (packageDir == null) throw const FormatException('还没有可写入的准备包。');
+    final result = await _run([
+      ..._packageDeploymentArgs(
+        packageDir,
+        force: force,
+        target: target,
+        excludedFiles: excludedFiles,
+      ),
+      '--json',
+    ], streamOutput: false);
+    if (!result.ok) {
+      final message = result.stderr.trim().isNotEmpty
+          ? result.stderr.trim()
+          : result.stdout.trim();
+      throw FormatException(message.replaceFirst(RegExp(r'^error:\s*'), ''));
+    }
+    final data = _decodeJsonObject(result.stdout, label: '写入清单');
+    if (data == null) throw const FormatException('写入清单格式无效，请重新读取。');
+    return DeploymentPreview.fromJson(data);
   }
 
   Future<void> _deployPackage(
     String packageDir, {
     required bool force,
     GameDeploymentTarget target = GameDeploymentTarget.mediapc,
+    Set<String> excludedFiles = const {},
   }) async {
     if (!force && !File(state.currentBaselineManifest).existsSync()) {
       _append('缺少原始备份。请先在 fresh install 或 Steam 验证完整性之后创建原始备份。');
@@ -5395,22 +5531,14 @@ class StudioController extends StateNotifier<StudioState> {
       return;
     }
     final args = [
-      'deploy-package',
-      p.join(packageDir, 'package'),
-      '--game-dir',
-      state.gameDir,
-      '--target-root',
-      target.directoryName,
+      ..._packageDeploymentArgs(
+        packageDir,
+        force: force,
+        target: target,
+        excludedFiles: excludedFiles,
+      ),
+      '--yes',
     ];
-    if (state.preferredPath.trim().isNotEmpty) {
-      args.addAll(['--preferred-path', state.preferredPath]);
-    }
-    if (File(state.currentBaselineManifest).existsSync()) {
-      args.addAll(['--baseline-manifest', state.currentBaselineManifest]);
-    }
-    args.addAll(['--last-applied-manifest', state.lastAppliedPackageManifest]);
-    if (force) args.add('--force');
-    args.add('--yes');
     final result = await _run(args);
     if (result.ok) {
       final status = await _run(_statusArgs(), streamOutput: false);
@@ -5844,7 +5972,9 @@ class StudioController extends StateNotifier<StudioState> {
       if (args[1] == 'discard-pending') return '放弃新文件记录';
       if (args[1] == 'apply') return '写回已记录游戏文件';
     }
-    if (args.first == 'deploy-package') return '写入游戏文件';
+    if (args.first == 'deploy-package') {
+      return args.contains('--json') ? '读取写入文件清单' : '写入游戏文件';
+    }
     if (args.first == 'language-swap' && args.length > 1) {
       if (args[1] == 'list') return '读取语言文件';
       if (args[1] == 'preferred') return '读取当前语言偏好';
@@ -6436,5 +6566,6 @@ class _AiEnvironmentHeartbeat {
 final studioProvider = StateNotifierProvider<StudioController, StudioState>((
   ref,
 ) {
-  return StudioController(ref.watch(sharedPreferencesProvider));
+  return StudioController(ref.watch(sharedPreferencesProvider))
+    ..hasUnsavedEdits = () => ref.read(unsavedEditsProvider).isDirty;
 });

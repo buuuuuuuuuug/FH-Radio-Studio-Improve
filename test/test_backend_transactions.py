@@ -293,6 +293,106 @@ def test_baseline_restore_rejects_manifest_path_escape(tmp_path):
     assert snapshot(tmp_path) == before
 
 
+def make_overlay_restore(tmp_path):
+    """Use the real default deployment flow so ownership is not fabricated."""
+    game, saved, files = make_baseline(tmp_path)
+    stinger = "media/audio/FMODBanks/R1_Stingers_JP.assets.bank"
+    for root, data in ((saved, b"original stinger"), (game, b"previous stinger")):
+        path = root / stinger
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    files.append(
+        {
+            "relative_path": "FMODBanks/R1_Stingers_JP.assets.bank",
+            "install_relative_path": stinger,
+            "md5": md5_file(saved / stinger),
+        }
+    )
+    manifest = saved / "baseline_manifest.json"
+    manifest.write_text(json.dumps({"kind": "game_baseline", "files": files}), encoding="utf-8")
+    package = tmp_path / "package"
+    for item in files:
+        path = package / item["install_relative_path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"deployed overlay:" + path.name.encode())
+    (package / "fh_radio_studio_package_manifest.json").write_text("{}", encoding="utf-8")
+    fingerprint = tmp_path / "fingerprint.json"
+    deploy.cmd_deploy_package(
+        argparse.Namespace(
+            game_dir=str(game),
+            package_dir=str(package),
+            target_root="mediapc",
+            baseline_manifest=str(manifest),
+            last_applied_manifest=str(fingerprint),
+            force=False,
+            yes=True,
+            preferred_path=None,
+        )
+    )
+    args = argparse.Namespace(
+        baseline_action="apply",
+        game_dir=str(game),
+        baseline_dir=str(saved),
+        last_applied_manifest=str(fingerprint),
+        yes=True,
+    )
+    return args, game, saved, files
+
+
+def test_baseline_restore_removes_only_owned_overrides_in_its_scope(tmp_path):
+    args, game, saved, files = make_overlay_restore(tmp_path)
+    unrelated = game / "mediapc/audio/FMODBanks/R2_Stingers_JP.assets.bank"
+    unrelated.write_bytes(b"another project's resource")
+    assert baseline.cmd_baseline(args) == 0
+    for item in files:
+        relative = item["install_relative_path"]
+        assert (game / relative).read_bytes() == (saved / relative).read_bytes()
+        assert not (game / relative.replace("media/", "mediapc/", 1)).exists()
+    assert unrelated.read_bytes() == b"another project's resource"
+
+
+@pytest.mark.parametrize("ownership", ["missing", "changed"])
+def test_baseline_restore_refuses_unowned_overrides_before_any_write(tmp_path, ownership):
+    args, game, _, files = make_overlay_restore(tmp_path)
+    if ownership == "missing":
+        args.last_applied_manifest = None
+    else:
+        relative = files[-1]["install_relative_path"].replace("media/", "mediapc/", 1)
+        (game / relative).write_bytes(b"modified by another program")
+    before = snapshot(tmp_path)
+    with pytest.raises(CliError, match="not owned"):
+        baseline.cmd_baseline(args)
+    assert snapshot(tmp_path) == before
+
+
+def test_baseline_restore_overlay_cleanup_failure_rolls_back_all_changes(tmp_path):
+    args, game, _, files = make_overlay_restore(tmp_path)
+    before = snapshot(tmp_path)
+    overlay = game / files[-1]["install_relative_path"].replace("media/", "mediapc/", 1)
+    original = file_transaction.os.replace
+    failed = False
+
+    def fail_cleanup(source, destination):
+        nonlocal failed
+        if not failed and Path(source) == overlay:
+            failed = True
+            raise OSError("injected restoration override cleanup failure")
+        return original(source, destination)
+
+    with patch.object(file_transaction.os, "replace", side_effect=fail_cleanup):
+        with pytest.raises(OSError, match="injected restoration"):
+            baseline.cmd_baseline(args)
+    assert snapshot(tmp_path) == before
+
+
+def test_baseline_restore_dry_run_keeps_media_and_owned_overrides(tmp_path):
+    args, _, _, _ = make_overlay_restore(tmp_path)
+    args.yes = False
+    before = snapshot(tmp_path)
+    assert baseline.cmd_baseline(args) == 0
+    assert snapshot(tmp_path) == before
+
+
 def test_promote_corrupt_pending_preserves_current(tmp_path):
     current, pending = tmp_path / "current", tmp_path / "pending"
     current.mkdir()

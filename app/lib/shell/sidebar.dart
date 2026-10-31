@@ -114,6 +114,10 @@ class Sidebar extends ConsumerWidget {
         return RmRoutes.settings;
       case 'playlist':
         return RmRoutes.playlist;
+      case 'voices':
+        return RmRoutes.voices;
+      case 'stingers':
+        return RmRoutes.stingers;
     }
     return RmRoutes.dashboard;
   }
@@ -196,6 +200,10 @@ class TabsBar extends ConsumerWidget {
         return RmRoutes.settings;
       case 'playlist':
         return RmRoutes.playlist;
+      case 'voices':
+        return RmRoutes.voices;
+      case 'stingers':
+        return RmRoutes.stingers;
     }
     return RmRoutes.dashboard;
   }

@@ -1,3 +1,4 @@
+import 'rm_tooltip.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/delayed_repeat.dart';
@@ -257,7 +258,7 @@ class _RmButtonState extends State<RmButton> {
     );
 
     if (widget.tooltip != null) {
-      gestures = Tooltip(message: widget.tooltip!, child: gestures);
+      gestures = RmTooltip(message: widget.tooltip!, child: gestures);
     }
     return Semantics(
       container: true,

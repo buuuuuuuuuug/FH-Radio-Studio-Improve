@@ -1,3 +1,6 @@
+import '../core/playlist_action_errors.dart';
+import '../widgets/rm_banner.dart';
+import '../widgets/timing_dialog_frame.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,6 +30,104 @@ class UnsavedEdits {
   final entries = <String, PendingEdit>{};
   Future<bool>? _pending;
   bool get isDirty => entries.values.any((e) => e.dirty());
+  Future<bool> confirmForBuild(BuildContext context) async {
+    if (_pending != null) {
+      if (!await _pending! || !context.mounted) return false;
+      return confirmForBuild(context);
+    }
+    final edits = entries.values.where((e) => e.dirty()).toList();
+    if (edits.isEmpty) return true;
+    return _pending = _saveBeforeBuild(
+      context,
+      edits,
+    ).whenComplete(() => _pending = null);
+  }
+
+  Future<bool> _saveBeforeBuild(
+    BuildContext context,
+    List<PendingEdit> edits,
+  ) async {
+    var saving = false;
+    String? failure;
+    return await showDialog<bool>(
+          context: context,
+          builder: (ctx) => StatefulBuilder(
+            builder: (ctx, setState) => TimingDialogFrame(
+              title: '构建前保存修改？',
+              icon: 'check',
+              busy: saving,
+              width: 520,
+              body: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '${edits.map((e) => e.label).join('、')}尚未保存。保存后将按当前排布构建准备包。',
+                    style: RmText.body(color: ctx.rm.fg3),
+                  ),
+                  if (failure != null) ...[
+                    const SizedBox(height: 14),
+                    RmBanner(
+                      kind: RmBannerKind.danger,
+                      title: '尚未开始构建',
+                      body: failure!,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      '未保存的修改仍留在草稿中。可返回编辑修正，或重试保存。',
+                      style: RmText.sans(12, color: ctx.rm.fg3),
+                    ),
+                  ],
+                ],
+              ),
+              actions: [
+                RmButton(
+                  key: const ValueKey('build-unsaved-cancel'),
+                  label: '返回编辑',
+                  onPressed: saving ? null : () => Navigator.pop(ctx, false),
+                ),
+                RmButton(
+                  key: const ValueKey('build-unsaved-save'),
+                  label: saving
+                      ? '正在保存…'
+                      : failure == null
+                      ? '保存并继续'
+                      : '重试保存',
+                  variant: RmButtonVariant.primary,
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          setState(() {
+                            saving = true;
+                            failure = null;
+                          });
+                          for (final edit in edits) {
+                            if (!edit.dirty()) continue;
+                            try {
+                              await edit.save();
+                            } on Object catch (error) {
+                              if (ctx.mounted) {
+                                setState(() {
+                                  saving = false;
+                                  failure = playlistActionFailure(
+                                    '保存${edit.label}',
+                                    error,
+                                  );
+                                });
+                              }
+                              return;
+                            }
+                          }
+                          if (ctx.mounted) Navigator.pop(ctx, true);
+                        },
+                ),
+              ],
+            ),
+          ),
+        ) ??
+        false;
+  }
+
   Future<bool> confirm(
     BuildContext context, {
     String? key,

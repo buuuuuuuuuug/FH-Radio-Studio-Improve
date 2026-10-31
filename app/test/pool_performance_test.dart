@@ -146,7 +146,7 @@ void main() {
           expect(sourceRect.width, greaterThanOrEqualTo(220));
           expect(actionRect.left - sourceRect.right, greaterThanOrEqualTo(16));
         } else {
-          expect(actionRect.top - sourceRect.bottom, greaterThanOrEqualTo(10));
+          expect(sourceRect.top - actionRect.bottom, greaterThanOrEqualTo(8));
         }
       }
 

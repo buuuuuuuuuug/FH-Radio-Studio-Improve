@@ -92,7 +92,7 @@ class _BpmDialogState extends State<_BpmDialog> {
             controller: _value,
             autofocus: true,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: RmText.mono(22, color: rm.fg),
+            style: RmText.statValue(color: rm.fg),
             decoration: rmFieldDecoration(context, error: _error).copyWith(
               suffixText: 'BPM',
               suffixStyle: RmText.mono(12, color: rm.fg3),

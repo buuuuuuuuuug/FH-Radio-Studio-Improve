@@ -23,6 +23,7 @@ class WaveformCard extends StatefulWidget {
     required this.onZoomOut,
     this.compact = false,
     this.onWheelZoom,
+    this.onViewportWidth,
   });
 
   final ReplaceEditorState state;
@@ -31,6 +32,7 @@ class WaveformCard extends StatefulWidget {
   final VoidCallback onZoomIn;
   final VoidCallback onZoomOut;
   final ValueChanged<double>? onWheelZoom;
+  final ValueChanged<double>? onViewportWidth;
 
   /// 精简模式：用于人工选点面板，去掉无关的视图切换 toolbar 与 zoom 概览条，
   /// 只保留可点选的波形和时间轴。
@@ -243,6 +245,7 @@ class _WaveformCardState extends State<WaveformCard> {
     final ai = state.ai;
     return LayoutBuilder(
       builder: (context, c) {
+        widget.onViewportWidth?.call(c.maxWidth);
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onHorizontalDragStart: (d) {

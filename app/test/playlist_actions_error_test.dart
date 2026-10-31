@@ -125,6 +125,9 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(find.text('构建准备包').first);
     await t.pumpAndSettle();
+    expect(find.text('构建前保存修改？'), findsOneWidget);
+    await t.tap(find.byKey(const ValueKey('build-unsaved-save')));
+    await t.pumpAndSettle();
     expect(find.textContaining('构建准备包失败：磁盘空间不足'), findsOneWidget);
     expect(t.takeException(), isNull);
   });

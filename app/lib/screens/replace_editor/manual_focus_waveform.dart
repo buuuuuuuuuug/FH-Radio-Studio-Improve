@@ -54,7 +54,13 @@ class ManualFocusWaveform extends StatefulWidget {
     this.windowStart = 0,
     this.windowEnd,
     this.onZoom,
+    this.onViewportWidth,
     this.onQuickConfirm,
+    this.onSeek,
+    this.onSelection,
+    this.selectionStart,
+    this.selectionEnd,
+    this.timeGrid = false,
   });
 
   final WaveformBars bars;
@@ -77,7 +83,12 @@ class ManualFocusWaveform extends StatefulWidget {
   final double windowStart;
   final double? windowEnd;
   final ValueChanged<double>? onZoom;
+  final ValueChanged<double>? onViewportWidth;
   final VoidCallback? onQuickConfirm;
+  final ValueChanged<double>? onSeek;
+  final void Function(double start, double end)? onSelection;
+  final double? selectionStart, selectionEnd;
+  final bool timeGrid;
 
   /// 放点回调。[isMove] 区分按下（挑最近端点）与拖动（沿用当前端点）。
   final void Function(double seconds, {required bool isMove}) onPlace;
@@ -87,10 +98,12 @@ class ManualFocusWaveform extends StatefulWidget {
 }
 
 class _ManualFocusWaveformState extends State<ManualFocusWaveform> {
-  static const double _flagPad = 20;
+  double get _flagPad => widget.handles.isEmpty ? 4 : 20;
 
   double? _width;
   bool _dragging = false;
+  bool _seeking = false;
+  double? _selectionAnchor;
 
   double get _end => widget.windowEnd ?? widget.duration;
   double get _span => math.max(0.001, _end - widget.windowStart);
@@ -103,21 +116,45 @@ class _ManualFocusWaveformState extends State<ManualFocusWaveform> {
 
   void _down(PointerDownEvent e) {
     if (widget.locked) return;
-    if (e.buttons == 2 && HardwareKeyboard.instance.isControlPressed) {
+    if (e.buttons == 1) {
+      _seeking = true;
+      widget.onSeek?.call(_timeAt(e.localPosition.dx));
+      return;
+    }
+    if (e.buttons == 2 &&
+        HardwareKeyboard.instance.isControlPressed &&
+        widget.onQuickConfirm != null) {
       widget.onQuickConfirm?.call();
       return;
     }
-    if (e.buttons != 1) return;
+    if (e.buttons != 2) return;
     _dragging = true;
-    widget.onPlace(_timeAt(e.localPosition.dx), isMove: false);
+    final time = _timeAt(e.localPosition.dx);
+    if (widget.onSelection != null) {
+      _selectionAnchor = time;
+      widget.onSelection!(time, time);
+    } else {
+      widget.onPlace(time, isMove: false);
+    }
   }
 
   void _move(PointerMoveEvent e) {
-    if (widget.locked || !_dragging) return;
-    widget.onPlace(_timeAt(e.localPosition.dx), isMove: true);
+    if (widget.locked) return;
+    final time = _timeAt(e.localPosition.dx);
+    if (_seeking) widget.onSeek?.call(time);
+    if (!_dragging) return;
+    if (_selectionAnchor != null) {
+      widget.onSelection!(_selectionAnchor!, time);
+    } else {
+      widget.onPlace(time, isMove: true);
+    }
   }
 
-  void _up(PointerUpEvent _) => _dragging = false;
+  void _up(PointerUpEvent _) {
+    _dragging = false;
+    _seeking = false;
+    _selectionAnchor = null;
+  }
 
   MouseCursor get _cursor {
     if (widget.locked) return SystemMouseCursors.forbidden;
@@ -138,6 +175,7 @@ class _ManualFocusWaveformState extends State<ManualFocusWaveform> {
             height: _flagPad + widget.canvasHeight,
             child: LayoutBuilder(
               builder: (context, c) {
+                widget.onViewportWidth?.call(c.maxWidth);
                 _width = c.maxWidth;
                 final w = c.maxWidth;
                 return MouseRegion(
@@ -146,7 +184,7 @@ class _ManualFocusWaveformState extends State<ManualFocusWaveform> {
                     onPointerDown: _down,
                     onPointerMove: _move,
                     onPointerUp: _up,
-                    onPointerCancel: (_) => _dragging = false,
+                    onPointerCancel: (_) => _up(const PointerUpEvent()),
                     behavior: HitTestBehavior.opaque,
                     child: Stack(
                       clipBehavior: Clip.none,
@@ -164,6 +202,9 @@ class _ManualFocusWaveformState extends State<ManualFocusWaveform> {
                               handles: widget.handles,
                               topPad: _flagPad,
                               barsHeight: widget.canvasHeight,
+                              timeGrid: widget.timeGrid,
+                              selectionStart: widget.selectionStart,
+                              selectionEnd: widget.selectionEnd,
                             ),
                           ),
                         ),
@@ -268,16 +309,75 @@ class _ManualFocusWaveformState extends State<ManualFocusWaveform> {
 
   // --- 时间轴 ------------------------------------------------------------
   Widget _timeAxis(RmTheme rm) {
-    return Row(
-      children: [
-        for (int i = 0; i <= 5; i++) ...[
-          if (i != 0) const Spacer(),
-          Text(
-            _shortLabel(widget.windowStart + _span * i / 5),
-            style: RmText.mono(9.5, color: rm.fg4),
-          ),
-        ],
-      ],
+    return LayoutBuilder(
+      builder: (context, box) {
+        final style = RmText.mono(9.5, color: rm.fg4);
+        if (widget.timeGrid) {
+          final grid = WaveformTimeGrid(_span, box.maxWidth);
+          final step = grid.labelStep;
+          return SizedBox(
+            height: 14,
+            child: Stack(
+              children: [
+                for (
+                  var i = (widget.windowStart / step).ceil();
+                  i * step <= _end + .000001;
+                  i++
+                )
+                  _gridLabel(i * step, box.maxWidth, style),
+              ],
+            ),
+          );
+        }
+        final label = TextPainter(
+          text: TextSpan(text: _shortLabel(_end), style: style),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final intervals = ((box.maxWidth / (label.width + 10)).floor() - 1)
+            .clamp(1, 5);
+        return Row(
+          children: [
+            for (int i = 0; i <= intervals; i++) ...[
+              if (i != 0) const Spacer(),
+              SizedBox(
+                width: math.min(label.width, box.maxWidth / (intervals + 1)),
+                child: Text(
+                  _shortLabel(widget.windowStart + _span * i / intervals),
+                  style: style,
+                  maxLines: 1,
+                  overflow: TextOverflow.clip,
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _gridLabel(double time, double width, TextStyle style) {
+    final text = _shortLabel(time);
+    final measured = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    final x = (time - widget.windowStart) / _span * width;
+    final atStart = x.abs() < .01;
+    final atEnd = (x - width).abs() < .01;
+    final left = atStart
+        ? 0.0
+        : atEnd
+        ? width - measured.width
+        : x - measured.width / 2;
+    if (!atStart && !atEnd && (left < 0 || left + measured.width > width)) {
+      return const SizedBox.shrink();
+    }
+    return Positioned(
+      key: ValueKey('wave-time-${time.toStringAsFixed(6)}'),
+      left: left,
+      width: measured.width,
+      child: Text(text, style: style, maxLines: 1),
     );
   }
 }
@@ -296,6 +396,9 @@ class _FocusWavePainter extends CustomPainter {
     required this.barsHeight,
     required this.windowStart,
     required this.windowEnd,
+    this.timeGrid = false,
+    this.selectionStart,
+    this.selectionEnd,
   });
 
   final RmTheme rm;
@@ -307,6 +410,8 @@ class _FocusWavePainter extends CustomPainter {
   final double topPad;
   final double barsHeight;
   final double windowStart, windowEnd;
+  final bool timeGrid;
+  final double? selectionStart, selectionEnd;
 
   double _x(double t, double width) =>
       ((t - windowStart) / math.max(0.001, windowEnd - windowStart)) * width;
@@ -317,6 +422,37 @@ class _FocusWavePainter extends CustomPainter {
     final width = size.width;
     canvas.clipRect(Offset.zero & size);
     final centerY = topPad + barsHeight / 2;
+    if (selectionStart != null && selectionEnd != null) {
+      canvas.drawRect(
+        Rect.fromLTRB(
+          _x(selectionStart!, width),
+          topPad,
+          _x(selectionEnd!, width),
+          topPad + barsHeight,
+        ),
+        Paint()..color = accent.withAlpha(35),
+      );
+    }
+    if (timeGrid) {
+      final step = WaveformTimeGrid(windowEnd - windowStart, width).minorStep;
+      for (
+        var i = (windowStart / step).ceil();
+        i * step <= windowEnd + .000001;
+        i++
+      ) {
+        final major = i % 5 == 0;
+        final x = _x(i * step, width);
+        canvas.drawLine(
+          Offset(x, topPad),
+          Offset(x, topPad + barsHeight),
+          Paint()
+            ..color = major
+                ? rm.borderStrong.withAlpha(145)
+                : rm.border.withAlpha(125)
+            ..strokeWidth = major ? 1 : .5,
+        );
+      }
+    }
 
     // 循环阴影带（A→B）
     if (handles.length == 2) {
@@ -366,6 +502,7 @@ class _FocusWavePainter extends CustomPainter {
       duration: duration,
       windowStart: windowStart,
       windowEnd: windowEnd,
+      maximumBars: math.max(512, (width / 4).ceil()),
     );
     if (values.isNotEmpty) {
       final barPaint = Paint()..color = rm.fg3.withAlpha(200);
@@ -391,6 +528,29 @@ class _FocusWavePainter extends CustomPainter {
       old.windowEnd != windowEnd ||
       old.accent != accent ||
       old.handles != handles ||
+      old.timeGrid != timeGrid ||
+      old.selectionStart != selectionStart ||
+      old.selectionEnd != selectionEnd ||
       old.rm != rm ||
       old.barsHeight != barsHeight;
+}
+
+class WaveformTimeGrid {
+  WaveformTimeGrid(double span, double width) {
+    final pixelsPerSecond = math.max(1, width) / math.max(.00001, span);
+    var minor = .1;
+    while (minor * pixelsPerSecond < 6) {
+      minor *= 10;
+    }
+    while (minor * pixelsPerSecond > 60 && minor > .00001) {
+      minor /= 10;
+    }
+    minorStep = minor;
+    var label = minor * 5;
+    while (label * pixelsPerSecond < 80) {
+      label *= 2;
+    }
+    labelStep = label;
+  }
+  late final double minorStep, labelStep;
 }

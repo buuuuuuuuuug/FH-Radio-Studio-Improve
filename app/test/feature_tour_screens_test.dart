@@ -180,7 +180,7 @@ void main() {
     t,
   ) async {
     await setup(t, const PlaylistScreen());
-    await checkSteps(t, ['查看与编辑', '分场景编辑', '搜索歌曲', '电台列数与高度', '安排电台', '保存与构建']);
+    await checkSteps(t, ['查看与编辑', '分场景编辑', '查找与布局', '安排电台', '保存与构建']);
   });
   for (final embedded in [false, true]) {
     testWidgets(

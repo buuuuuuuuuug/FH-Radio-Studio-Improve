@@ -1,5 +1,7 @@
 import '../core/demo_song.dart';
 import '../widgets/feature_tour.dart';
+import '../widgets/external_audio_drop_target.dart';
+import '../widgets/audio_import_feedback.dart';
 import '../widgets/quick_assign_dialog.dart';
 import '../widgets/timing_export_dialog.dart';
 import '../state/library_columns.dart';
@@ -306,120 +308,129 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
         .toList();
     final importing = cli.busy && cli.busyLabel == '导入自建歌曲';
 
-    return PendingGate(
-      pending: importing,
-      label: '正在导入自建歌曲',
-      detail: '正在导入音频到项目 sources，必要时转换到 48 kHz，并刷新曲目信息。',
-      overlayKey: const ValueKey('custom-pool-import-gate'),
-      childOpacity: 0.42,
-      borderRadius: BorderRadius.zero,
-      child: ContainedScroll(
-        controller: _scroll,
-        child: SizedBox.expand(
-          child: Center(
-            child: _LibraryCanvas(
-              constraints: BoxConstraints(
-                maxWidth: ref
-                    .watch(layoutOptionsProvider)
-                    .pageWidth(RmTokens.pageDefault),
-              ),
-              child: SmoothScrollToTop(
-                controller: _scroll,
-                child: Stack(
-                  children: [
-                    CustomScrollView(
-                      controller: _scroll,
-                      scrollCacheExtent: const ScrollCacheExtent.pixels(200),
-                      slivers: [
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(40, 24, 40, 64),
-                          sliver: SliverMainAxisGroup(
-                            slivers: [
-                              SliverToBoxAdapter(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    _pageHead(
-                                      context,
-                                      cli,
-                                      sirenImporting: sirenImporting,
-                                    ),
-                                    const SizedBox(height: 8),
-                                    _sourceDirectories(context, all, cli),
-                                    if (DemoSong.sourceFor(cli.projectDir) !=
-                                        null)
-                                      const Padding(
-                                        padding: EdgeInsets.only(top: 12),
-                                        child: RmBanner(
-                                          kind: RmBannerKind.info,
-                                          title: '功能演示曲',
-                                          body:
-                                              '用于练习歌曲编辑与人工精修。完成介绍后，可用演示曲右侧的删除按钮移除。',
-                                        ),
-                                      ),
-                                    const WaveformBatchProgress(),
-                                    const SeamlessBatchProgress(),
-                                    const SizedBox(height: 16),
-                                    _statRow(
-                                      context,
-                                      total: all.length,
-                                      configured: configured.length,
-                                      unconfigured: unconfigured.length,
-                                      unassigned: unassigned.length,
-                                    ),
-                                    const SizedBox(height: 16),
-                                    if (possibleDuplicates.isNotEmpty) ...[
-                                      RmButton(
-                                        size: RmButtonSize.sm,
-                                        onPressed: () => setState(() {
-                                          _filter = _PoolFilter.all;
-                                          _browse = _browse.copyWith(
-                                            filter: SongFilter.duplicates,
-                                          );
-                                          _poolBrowse[cli.projectDir] = _browse;
-                                        }),
-                                        leading: const RmIcon('copy', size: 12),
-                                        label:
-                                            '发现 ${possibleDuplicates.length} 组可能重复的歌曲，点击查看',
+    return ExternalAudioDropTarget(
+      enabled: !cli.busy && !sirenImport.importing,
+      label: '松开以导入自建歌曲',
+      onDrop: _importMusicFiles,
+      child: PendingGate(
+        pending: importing,
+        label: '正在导入自建歌曲',
+        detail: '正在导入音频到项目 sources，必要时转换到 48 kHz，并刷新曲目信息。',
+        overlayKey: const ValueKey('custom-pool-import-gate'),
+        childOpacity: 0.42,
+        borderRadius: BorderRadius.zero,
+        child: ContainedScroll(
+          controller: _scroll,
+          child: SizedBox.expand(
+            child: Center(
+              child: _LibraryCanvas(
+                constraints: BoxConstraints(
+                  maxWidth: ref
+                      .watch(layoutOptionsProvider)
+                      .pageWidth(RmTokens.pageDefault),
+                ),
+                child: SmoothScrollToTop(
+                  controller: _scroll,
+                  child: Stack(
+                    children: [
+                      CustomScrollView(
+                        controller: _scroll,
+                        scrollCacheExtent: const ScrollCacheExtent.pixels(200),
+                        slivers: [
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(40, 24, 40, 64),
+                            sliver: SliverMainAxisGroup(
+                              slivers: [
+                                SliverToBoxAdapter(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      _pageHead(
+                                        context,
+                                        cli,
+                                        sirenImporting: sirenImporting,
                                       ),
                                       const SizedBox(height: 8),
+                                      _sourceDirectories(context, all, cli),
+                                      if (DemoSong.sourceFor(cli.projectDir) !=
+                                          null)
+                                        const Padding(
+                                          padding: EdgeInsets.only(top: 12),
+                                          child: RmBanner(
+                                            kind: RmBannerKind.info,
+                                            title: '功能演示曲',
+                                            body:
+                                                '用于练习歌曲编辑与人工精修。完成介绍后，可用演示曲右侧的删除按钮移除。',
+                                          ),
+                                        ),
+                                      const WaveformBatchProgress(),
+                                      const SeamlessBatchProgress(),
+                                      const SizedBox(height: 16),
+                                      _statRow(
+                                        context,
+                                        total: all.length,
+                                        configured: configured.length,
+                                        unconfigured: unconfigured.length,
+                                        unassigned: unassigned.length,
+                                      ),
+                                      const SizedBox(height: 16),
+                                      if (possibleDuplicates.isNotEmpty) ...[
+                                        RmButton(
+                                          size: RmButtonSize.sm,
+                                          onPressed: () => setState(() {
+                                            _filter = _PoolFilter.all;
+                                            _browse = _browse.copyWith(
+                                              filter: SongFilter.duplicates,
+                                            );
+                                            _poolBrowse[cli.projectDir] =
+                                                _browse;
+                                          }),
+                                          leading: const RmIcon(
+                                            'copy',
+                                            size: 12,
+                                          ),
+                                          label:
+                                              '发现 ${possibleDuplicates.length} 组可能重复的歌曲，点击查看',
+                                        ),
+                                        const SizedBox(height: 8),
+                                      ],
                                     ],
-                                  ],
-                                ),
-                              ),
-                              _tracksPanel(
-                                context,
-                                totalCount: panelTracks.length,
-                                visible: visible,
-                                cli: cli,
-                                unconfiguredCount: panelUnconfigured.length,
-                                configuredCount: panelConfigured.length,
-                                msrCount: msrTracks.length,
-                                latestPackage: latestPackage,
-                                playlistPlan: playlistPlan,
-                                splitTypes: splitTypes,
-                                gameAssignmentPlan: gameAssignmentPlan,
-                                uncertainGameSources:
-                                    membership?.uncertainSources ?? const {},
-                                gameAssignmentsKnown: gameAssignmentsKnown,
-                                sirenImporting: sirenImporting,
-                              ),
-                              SliverToBoxAdapter(
-                                child: Padding(
-                                  padding: const EdgeInsets.only(top: 14),
-                                  child: _infoBanner(
-                                    context,
-                                    customRadios: customRadios,
                                   ),
                                 ),
-                              ),
-                            ],
+                                _tracksPanel(
+                                  context,
+                                  totalCount: panelTracks.length,
+                                  visible: visible,
+                                  cli: cli,
+                                  unconfiguredCount: panelUnconfigured.length,
+                                  configuredCount: panelConfigured.length,
+                                  msrCount: msrTracks.length,
+                                  latestPackage: latestPackage,
+                                  playlistPlan: playlistPlan,
+                                  splitTypes: splitTypes,
+                                  gameAssignmentPlan: gameAssignmentPlan,
+                                  uncertainGameSources:
+                                      membership?.uncertainSources ?? const {},
+                                  gameAssignmentsKnown: gameAssignmentsKnown,
+                                  sirenImporting: sirenImporting,
+                                ),
+                                SliverToBoxAdapter(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(top: 14),
+                                    child: _infoBanner(
+                                      context,
+                                      customRadios: customRadios,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -450,7 +461,7 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
     required bool sirenImporting,
   }) {
     final rm = context.rm;
-    return Column(
+    final title = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('自建歌曲', style: RmText.pageH1(color: rm.fg)),
@@ -460,6 +471,29 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
           style: RmText.body(color: rm.fg3),
         ),
       ],
+    );
+    final actions = KeyedSubtree(
+      key: const ValueKey('pool-library-actions'),
+      child: _libraryActions(context, cli, sirenImporting),
+    ).tourAnchor('import');
+    return LayoutBuilder(
+      builder: (context, box) => box.maxWidth >= 900
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(child: title),
+                const SizedBox(width: 16),
+                actions,
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                title,
+                const SizedBox(height: 10),
+                Align(alignment: Alignment.centerRight, child: actions),
+              ],
+            ),
     );
   }
 
@@ -554,69 +588,23 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
               : tracks.map((t) => File(t.source).parent.path).toSet().toList()
           ..sort();
     final label = dirs.join(' · ');
-    final importing =
-        ref.watch(sirenImportQueueProvider).importing ||
-        cli.busyLabel == '导入塞壬唱片';
-    final actions = _libraryActions(context, cli, importing);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final directory = Row(
-          key: const ValueKey('pool-source-directory'),
-          children: [
-            RmIcon('folder', size: 12, color: context.rm.fg3),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Tooltip(
-                message: label,
-                child: Text(
-                  '来源目录 $label',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: RmText.mono(11, color: context.rm.fg3),
-                ),
-              ),
+    return Row(
+      key: const ValueKey('pool-source-directory'),
+      children: [
+        RmIcon('folder', size: 12, color: context.rm.fg3),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Tooltip(
+            message: label,
+            child: Text(
+              '来源目录 $label',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: RmText.mono(11, color: context.rm.fg3),
             ),
-          ],
-        );
-        // Reserve the actual labels' widths, including text scaling and busy labels.
-        var actionsWidth = 8.0 * (actions.children.length - 1);
-        for (final button in actions.children.cast<RmButton>()) {
-          final measure = TextPainter(
-            text: TextSpan(
-              text: button.label,
-              style: RmText.sans(
-                12.5,
-                weight: button.variant == RmButtonVariant.primary
-                    ? FontWeight.w600
-                    : FontWeight.w500,
-              ),
-            ),
-            textDirection: TextDirection.ltr,
-            textScaler: MediaQuery.textScalerOf(context),
-            maxLines: 1,
-          )..layout();
-          actionsWidth += measure.width.ceilToDouble() + 50;
-          measure.dispose();
-        }
-        final controls = KeyedSubtree(
-          key: const ValueKey('pool-library-actions'),
-          child: actions,
-        ).tourAnchor('import');
-        if (constraints.maxWidth >= actionsWidth + 16 + 220) {
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(child: directory),
-              const SizedBox(width: 16),
-              SizedBox(width: actionsWidth, child: controls),
-            ],
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [directory, const SizedBox(height: 10), controls],
-        );
-      },
+          ),
+        ),
+      ],
     );
   }
 
@@ -975,7 +963,24 @@ class _CustomPoolScreenState extends ConsumerState<CustomPoolScreen> {
         ref.read(sirenImportQueueProvider).importing) {
       return;
     }
-    await ref.read(studioProvider.notifier).importMusicPaths(paths);
+    await _importMusicFiles(paths);
+  }
+
+  Future<void> _importMusicFiles(List<String> paths) async {
+    if (!mounted ||
+        paths.isEmpty ||
+        ref.read(studioProvider).busy ||
+        ref.read(sirenImportQueueProvider).importing) {
+      return;
+    }
+    try {
+      final message = await ref
+          .read(studioProvider.notifier)
+          .importMusicPaths(paths);
+      if (mounted && message != null) showAudioImportResult(context, message);
+    } on Object catch (error) {
+      if (mounted) showAudioImportResult(context, '歌曲导入失败：$error');
+    }
   }
 
   void _openFirstInputFolder() {

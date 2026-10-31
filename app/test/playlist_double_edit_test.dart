@@ -224,7 +224,7 @@ void main() {
         'midnight',
       );
       expect(f.container.read(effectivePlaylistPlanProvider), f.plan);
-      expect(find.text('双击自建曲目进入编辑'), findsOneWidget);
+      expect(find.textContaining('双击自建曲目进入编辑'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('playlist-clear-search')));
       await tester.pump();
       expect(tester.widget<TextField>(search).controller!.text, isEmpty);
@@ -289,7 +289,7 @@ void main() {
     );
     expect(tester.widget<TrackCard>(cards.at(0)).locked, isTrue);
     expect(tester.widget<TrackCard>(cards.at(0)).onOpenEditor, isNull);
-    expect(find.text('双击自建曲目进入编辑'), findsNothing);
+    expect(find.textContaining('双击自建曲目进入编辑'), findsNothing);
     expect(tester.widget<TrackCard>(cards.at(1)).onOpenEditor, isNull);
     await doubleClick(tester, cards.at(1));
     await tester.pump();

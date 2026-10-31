@@ -134,6 +134,7 @@ class WaveformPainter extends CustomPainter {
       duration: duration,
       windowStart: windowStart,
       windowEnd: windowEnd,
+      maximumBars: math.max(512, (width / 4).ceil()),
     );
     final n = values.length;
     final barWidth = width / n * 0.85;

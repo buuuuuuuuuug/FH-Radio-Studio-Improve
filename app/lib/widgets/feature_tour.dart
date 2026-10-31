@@ -10,7 +10,20 @@ import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import 'rm_button.dart';
 
-enum TourPage { welcome, basics, library, song, refine, playlist, settings }
+enum TourPage {
+  welcome,
+  basics,
+  library,
+  song,
+  refine,
+  playlist,
+  stingers,
+  stingerEditor,
+  voices,
+  voiceMaterial,
+  voiceReplacementEditor,
+  settings,
+}
 
 class TourStep {
   const TourStep(
@@ -27,7 +40,97 @@ class TourStep {
   final bool optional;
 }
 
+const _voiceEditorSteps = [
+  TourStep('wave', '定位与选区', '左键移动播放指针，右键拖出选区；Ctrl+滚轮缩放，下方缩略波形可移动视野。'),
+  TourStep(
+    'transport',
+    '试听与撤销',
+    'Space 播放或暂停；Ctrl+Z 撤销，Ctrl+Y 重做。恢复原音会撤回当前音频编辑。',
+  ),
+  TourStep(
+    'edits',
+    '简易音频编辑',
+    '在播放指针处插入静音，默认 100ms，可按 50ms 调整；选区可静音或删除。操作保留原素材文件。',
+  ),
+  TourStep('settings', '素材信息与音量', '调整音量；素材池中的音频还可修改名称和文件夹。'),
+  TourStep(
+    'duration',
+    '替换后的时长',
+    '默认使用编辑后的实际时长；开启「保持原时长」后，不足补静音、超出裁剪。游戏事件仍可能限制播放长度。',
+    optional: true,
+  ),
+];
+
 const _steps = <TourPage, List<TourStep>>{
+  TourPage.stingers: [
+    TourStep('view', '查看与编辑台呼', '「游戏内」只读查看当前台呼；「准备包」编辑替换。语音语言跟随概览设置，可复制游戏内排布。'),
+    TourStep(
+      'search',
+      '查找与布局',
+      '搜索素材名称；下方可调整电台列数、高度，或切换为一行电台。',
+      endTarget: 'layout',
+    ),
+    TourStep(
+      'import',
+      '准备台呼素材',
+      '导入音频到池子，双击素材编辑与试听；原有台呼也能试听歌曲衔接。',
+      optional: true,
+    ),
+    TourStep(
+      'board',
+      '按电台分配',
+      '拖入素材替换，互拖交换，Ctrl 拖动复制；选中素材后 Ctrl+D 快捷分配。双击台呼调整选段和下一首进入位置。',
+    ),
+    TourStep(
+      'save',
+      '保存与构建',
+      '分配与选段保存后用于构建；构建前可统一调节音量并试听。完成后到概览写入歌曲、台呼和 RadioInfo。',
+      endTarget: 'build',
+    ),
+  ],
+  TourPage.stingerEditor: [
+    TourStep('wave', '台呼波形', '左键定位播放，右键调整选点；Ctrl+滚轮缩放，下方缩略波形移动视野。'),
+    TourStep('transport', '播放与试听', '播放、撤销与重做；可对比原有台呼，或试听前后歌曲的衔接。'),
+    TourStep(
+      'timing',
+      '时间点',
+      'A/B 裁剪台呼，「下一首开始」控制歌曲进入位置；可输入时间或微调。',
+      optional: true,
+    ),
+    TourStep('settings', '台呼设置', '选择素材、调整音量，并设置衔接试听的前后歌曲与时长。原有台呼只供试听。'),
+  ],
+  TourPage.voices: [
+    TourStep(
+      'resources',
+      '选择音频资源',
+      '按分类和语言选择资源，也可添加自选文件；点击「备份并解析」缓存全部条目。绿色表示已解析，粗体与左侧竖线表示已修改。',
+    ),
+    TourStep(
+      'entries',
+      '对照原音与替换',
+      '左侧为原音，右侧为替换。两列文本分别跟随概览中的语音语言和显示语言；Ctrl+左键复制文本。列宽可拖动，双击恢复。',
+      optional: true,
+    ),
+    TourStep(
+      'pool',
+      '整理替换素材',
+      '导入或拖入音频，按文件夹整理。Ctrl 多选、Shift 连选；双击素材编辑，拖到对应条目完成替换。',
+    ),
+    TourStep(
+      'tools',
+      '查找与批量操作',
+      '搜索原音文本、替换名称或分类；多选条目可导出文本或加入素材池，也可撤销、重做与恢复原音。右侧可打开音频目录或删除解析。',
+      endTarget: 'tools-end',
+      optional: true,
+    ),
+    TourStep(
+      'workflow',
+      '保存、构建与写入',
+      '保存修改后构建语音准备包，再核对文件清单并写入游戏。语音准备包与歌曲、台呼分别管理；写入前会备份原文件。',
+    ),
+  ],
+  TourPage.voiceMaterial: _voiceEditorSteps,
+  TourPage.voiceReplacementEditor: _voiceEditorSteps,
   TourPage.welcome: [
     TourStep('project', '从工程开始', '新建或打开一个工程，用来保存歌曲、时间点和电台排布。'),
     TourStep('help', '边用边了解', '首次进入各页面会介绍核心功能。这里或主界面右上角的问号可重看当前页面介绍。'),
@@ -93,7 +196,7 @@ const _steps = <TourPage, List<TourStep>>{
     ),
   ],
   TourPage.refine: [
-    TourStep('waveform', '放置端点', '点击或拖动波形调整端点；循环可分别选择 A、B。'),
+    TourStep('waveform', '放置端点', '左键定位播放；右键点击或拖动调整端点，循环可分别选择 A、B。'),
     TourStep('values', '精确微调', '输入时间或使用微调按钮；也可自由放置端点，或提取当前播放位置。'),
     TourStep('audition', '试听设置', '调整播放起点试听时长、循环拼接前后时长和音量。使用旁边的试听按钮检查当前选点。'),
     TourStep(
@@ -115,11 +218,11 @@ const _steps = <TourPage, List<TourStep>>{
       '分场景编辑',
       '实验功能，可分别编排漫游和比赛，概览基础设置也有开关。关闭时选择统一列表并保留两套排布，再开启即可恢复；统一期间的修改不会并入。',
     ),
-    TourStep('search', '搜索歌曲', '按歌曲、歌手或文件名搜索；池子可按全部、漫游或比赛筛选已分配的歌曲。'),
     TourStep(
-      'layout',
-      '电台列数与高度',
-      '列数可自动适配或手动调整；高度可按内容、全部电台或一行电台安排，便于在不同屏幕上编辑。',
+      'search',
+      '查找与布局',
+      '搜索歌曲、歌手或文件名；调整电台列数和高度，可按内容、全部电台或一行电台安排。',
+      endTarget: 'layout',
     ),
     TourStep(
       'board',
@@ -161,7 +264,8 @@ class FeatureTours {
   final SharedPreferences preferences;
   final _scopes = <_FeatureTourScopeState>[];
   final _seen = <TourPage>{};
-  bool _showing = false;
+  _FeatureTourScopeState? _activeScope;
+  bool get _showing => _activeScope != null;
   bool seen(TourPage page) =>
       _seen.contains(page) || preferences.getBool(_key(page)) == true;
   String _key(TourPage page) => 'rm.tour.v2.${page.name}';
@@ -213,6 +317,8 @@ class _FeatureTourScopeState extends ConsumerState<FeatureTourScope> {
     },
   };
   bool _scheduled = false;
+  NavigatorState? _tourNavigator;
+  DialogRoute<bool>? _tourRoute;
   bool get _currentRoute => ModalRoute.of(context)?.isCurrent ?? false;
 
   @override
@@ -224,6 +330,13 @@ class _FeatureTourScopeState extends ConsumerState<FeatureTourScope> {
   @override
   void dispose() {
     _tours._scopes.remove(this);
+    if (identical(_tours._activeScope, this)) _tours._activeScope = null;
+    final route = _tourRoute, navigator = _tourNavigator;
+    if (route != null && navigator != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (navigator.mounted && route.isActive) navigator.removeRoute(route);
+      });
+    }
     super.dispose();
   }
 
@@ -239,10 +352,10 @@ class _FeatureTourScopeState extends ConsumerState<FeatureTourScope> {
         )
         .toList();
     if (steps.isEmpty) return;
-    _tours._showing = true;
+    _tours._activeScope = this;
     bool? done;
     try {
-      done = await showDialog<bool>(
+      final route = _tourRoute = DialogRoute<bool>(
         context: context,
         barrierColor: Colors.transparent,
         barrierDismissible: false,
@@ -252,8 +365,12 @@ class _FeatureTourScopeState extends ConsumerState<FeatureTourScope> {
           onReveal: widget.onReveal,
         ),
       );
+      final navigator = _tourNavigator = Navigator.of(context);
+      done = await navigator.push(route);
     } finally {
-      _tours._showing = false;
+      _tourRoute = null;
+      _tourNavigator = null;
+      if (identical(_tours._activeScope, this)) _tours._activeScope = null;
     }
     if (done != null) await _tours._remember(widget.page);
     if (done == true && mounted) await widget.onComplete?.call();
@@ -326,6 +443,7 @@ class FeatureTourButton extends ConsumerWidget {
   final bool iconOnly;
   @override
   Widget build(BuildContext context, WidgetRef ref) => RmButton(
+    key: key ?? const ValueKey('feature-tour-open'),
     label: iconOnly ? null : '功能介绍',
     tooltip: '重新查看当前页面的功能介绍',
     leading: const Icon(Icons.help_outline_rounded, size: 16),
@@ -374,7 +492,9 @@ class _TourOverlayState extends State<_TourOverlay>
 
   @override
   void didChangeMetrics() {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _reveal();
+    });
   }
 
   Future<void> _reveal() async {

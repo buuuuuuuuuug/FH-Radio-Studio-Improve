@@ -9,6 +9,7 @@ enum EditorAction {
   confirm,
   save,
   undo,
+  redo,
   beatBack,
   beatForward,
   tenBack,
@@ -179,6 +180,7 @@ String editorActionLabel(EditorAction a) => switch (a) {
   EditorAction.confirm => '确认当前选点',
   EditorAction.save => '保存歌曲配置',
   EditorAction.undo => '撤销',
+  EditorAction.redo => '重做',
   EditorAction.beatBack => '后退 1 拍',
   EditorAction.beatForward => '前进 1 拍',
   EditorAction.tenBack => '减少 10ms',
@@ -211,6 +213,7 @@ Map<EditorAction, EditorChord> defaultEditorShortcuts() {
     EditorAction.confirm: const EditorChord(LogicalKeyboardKey.enter),
     EditorAction.save: const EditorChord(LogicalKeyboardKey.keyS, ctrl: true),
     EditorAction.undo: const EditorChord(LogicalKeyboardKey.keyZ, ctrl: true),
+    EditorAction.redo: const EditorChord(LogicalKeyboardKey.keyY, ctrl: true),
     EditorAction.beatBack: const EditorChord(LogicalKeyboardKey.arrowLeft),
     EditorAction.beatForward: const EditorChord(LogicalKeyboardKey.arrowRight),
     EditorAction.tenBack: const EditorChord(
@@ -461,7 +464,16 @@ class EditorShortcutController
                 (prefs.getInt('editor.shortcuts.version') ?? 1) < 9 &&
                 previousGroupKey != null &&
                 chord.token == EditorChord(previousGroupKey, shift: true).token;
-            if (!oldNavigationDefault &&
+            final oldRedoDefault =
+                a == EditorAction.redo &&
+                chord.token ==
+                    const EditorChord(
+                      LogicalKeyboardKey.keyZ,
+                      ctrl: true,
+                      shift: true,
+                    ).token;
+            if (!oldRedoDefault &&
+                !oldNavigationDefault &&
                 !oldRestoreDefault &&
                 !oldEditorDefault &&
                 !oldGroupDefault) {
@@ -499,7 +511,7 @@ class EditorShortcutController
     if (problem != null) throw FormatException(problem);
     prefs.setString('editor.loopModifier', modifier);
     state = Map.unmodifiable(value);
-    prefs.setInt('editor.shortcuts.version', 9);
+    prefs.setInt('editor.shortcuts.version', 10);
     prefs.setString(
       'editor.shortcuts.v1',
       jsonEncode({for (final e in value.entries) e.key.name: e.value.toJson()}),

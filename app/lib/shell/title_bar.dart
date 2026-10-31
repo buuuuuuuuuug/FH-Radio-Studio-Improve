@@ -1,3 +1,4 @@
+import '../widgets/rm_tooltip.dart';
 import '../widgets/feature_tour.dart';
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
@@ -19,11 +20,8 @@ class TitleBar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final rm = context.rm;
-    final cli = ref.watch(studioProvider);
-    final showTrafficLights = Platform.isMacOS;
+    final rm = context.rm, cli = ref.watch(studioProvider);
     final toolchain = cli.toolchainStatus;
-
     return Container(
       height: RmTokens.titleBarHeight,
       padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -31,56 +29,80 @@ class TitleBar extends ConsumerWidget {
         color: rm.bg,
         border: Border(bottom: BorderSide(color: rm.border)),
       ),
-      child: Row(
-        children: [
-          if (showTrafficLights) ...[
-            _trafficLight(RmTokens.trafficRed),
-            const SizedBox(width: 8),
-            _trafficLight(RmTokens.trafficYellow),
-            const SizedBox(width: 8),
-            _trafficLight(RmTokens.trafficGreen),
-            const SizedBox(width: 12),
-          ],
-          RichText(
-            text: TextSpan(
-              style: RmText.sans(12, color: rm.fg2),
-              children: [
-                TextSpan(
-                  text: 'FH Radio Studio',
-                  style: RmText.mono(
-                    12,
-                    color: rm.fg,
-                    weight: FontWeight.w600,
-                    letterSpacing: 0.04 * 12,
-                  ),
-                ),
-                const TextSpan(text: ' · FH6 电台修改工具'),
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final small = box.maxWidth < 1000, compact = box.maxWidth < 760;
+          return Row(
+            children: [
+              if (Platform.isMacOS) ...[
+                _trafficLight(RmTokens.trafficRed),
+                const SizedBox(width: 8),
+                _trafficLight(RmTokens.trafficYellow),
+                const SizedBox(width: 8),
+                _trafficLight(RmTokens.trafficGreen),
+                const SizedBox(width: 12),
               ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          _projectPill(
-            context,
-            p.basename(cli.projectDir),
-            onTap: () => context.go('${RmRoutes.boot}?manual=1'),
-          ),
-          const Spacer(),
-          _statusItem(
-            context,
-            _toolchainLedKind(toolchain),
-            _toolchainLabel(toolchain),
-          ),
-          const SizedBox(width: 14),
-          _statusItem(
-            context,
-            cli.gameRunning ? _LedKind.warn : _LedKind.ok,
-            cli.gameRunning ? '游戏运行中' : '游戏未运行',
-          ),
-          const SizedBox(width: 14),
-          Text('项目已打开', style: RmText.sans(11.5, color: rm.fg3)),
-          const SizedBox(width: 14),
-          const FeatureTourButton(iconOnly: true),
-        ],
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      flex: 3,
+                      child: RichText(
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        text: TextSpan(
+                          style: RmText.sans(12, color: rm.fg2),
+                          children: [
+                            TextSpan(
+                              text: 'FH Audio Studio',
+                              style: RmText.mono(
+                                12,
+                                color: rm.fg,
+                                weight: FontWeight.w600,
+                                letterSpacing: .48,
+                              ),
+                            ),
+                            if (!small) const TextSpan(text: ' · FH6 电台修改工具'),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Flexible(
+                      flex: 3,
+                      child: _projectPill(
+                        context,
+                        p.basename(cli.projectDir),
+                        compact: small,
+                        onTap: () => context.go('${RmRoutes.boot}?manual=1'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              _statusItem(
+                context,
+                _toolchainLedKind(toolchain),
+                _toolchainLabel(toolchain),
+                iconOnly: compact,
+              ),
+              const SizedBox(width: 12),
+              _statusItem(
+                context,
+                cli.gameRunning ? _LedKind.warn : _LedKind.ok,
+                cli.gameRunning ? '游戏运行中' : '游戏未运行',
+                iconOnly: small,
+              ),
+              if (!small) ...[
+                const SizedBox(width: 14),
+                Text('项目已打开', style: RmText.sans(11.5, color: rm.fg3)),
+              ],
+              const SizedBox(width: 12),
+              const FeatureTourButton(iconOnly: true),
+            ],
+          );
+        },
       ),
     );
   }
@@ -97,9 +119,10 @@ class TitleBar extends ConsumerWidget {
     BuildContext context,
     String name, {
     required VoidCallback onTap,
+    bool compact = false,
   }) {
     final rm = context.rm;
-    return Tooltip(
+    return RmTooltip(
       message: '切换项目',
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
@@ -117,11 +140,20 @@ class TitleBar extends ConsumerWidget {
               children: [
                 RmIcon('folder', size: 11, color: rm.fg2),
                 const SizedBox(width: 8),
-                Text(name, style: RmText.mono(11.5, color: rm.fg)),
-                const SizedBox(width: 6),
-                Text('·', style: RmText.mono(11.5, color: rm.fg4)),
-                const SizedBox(width: 6),
-                Text('已保存', style: RmText.sans(11.5, color: rm.fg2)),
+                Flexible(
+                  child: Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: RmText.mono(11.5, color: rm.fg),
+                  ),
+                ),
+                if (!compact) ...[
+                  const SizedBox(width: 6),
+                  Text('·', style: RmText.mono(11.5, color: rm.fg4)),
+                  const SizedBox(width: 6),
+                  Text('已保存', style: RmText.sans(11.5, color: rm.fg2)),
+                ],
               ],
             ),
           ),
@@ -130,7 +162,12 @@ class TitleBar extends ConsumerWidget {
     );
   }
 
-  Widget _statusItem(BuildContext context, _LedKind kind, String label) {
+  Widget _statusItem(
+    BuildContext context,
+    _LedKind kind,
+    String label, {
+    bool iconOnly = false,
+  }) {
     final rm = context.rm;
     final color = switch (kind) {
       _LedKind.ok => rm.accent.base,
@@ -138,21 +175,26 @@ class TitleBar extends ConsumerWidget {
       _LedKind.danger => rm.danger,
     };
     final glow = color.withAlpha((0.4 * 255).round());
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-            boxShadow: [BoxShadow(color: glow, blurRadius: 8)],
+    return RmTooltip(
+      message: label,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: glow, blurRadius: 8)],
+            ),
           ),
-        ),
-        const SizedBox(width: 6),
-        Text(label, style: RmText.sans(11.5, color: rm.fg3)),
-      ],
+          if (!iconOnly) ...[
+            const SizedBox(width: 6),
+            Text(label, style: RmText.sans(11.5, color: rm.fg3)),
+          ],
+        ],
+      ),
     );
   }
 

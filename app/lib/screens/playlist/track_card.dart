@@ -1,3 +1,4 @@
+import '../../widgets/rm_tooltip.dart';
 import 'playlist_draggable.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
@@ -26,12 +27,30 @@ class TrackCard extends StatefulWidget {
     this.assignmentLabels = const [],
     this.dragging = false,
     this.order,
+    this.numberOnly = false,
     this.onOpenEditor,
     this.onSelect,
     this.selected = false,
     this.selectionMode = false,
+    this.trailing,
+    this.bodyBuilder,
+    this.allowLockedOpen = false,
+    this.tooltip,
+    this.onActivate,
+    this.showDuration = true,
+    this.pending = false,
+    this.accentColor,
+    this.neutral = false,
   });
 
+  final Widget? trailing;
+  final Widget Function(Widget body)? bodyBuilder;
+  final bool allowLockedOpen;
+  final String? tooltip;
+  final VoidCallback? onActivate;
+  final bool showDuration, pending;
+  final Color? accentColor;
+  final bool neutral;
   final String title;
   final String artist;
   final double durationSec;
@@ -42,6 +61,7 @@ class TrackCard extends StatefulWidget {
   final List<String> assignmentLabels;
   final bool dragging;
   final int? order;
+  final bool numberOnly;
   final VoidCallback? onOpenEditor;
   final void Function(bool control, bool shift)? onSelect;
   final bool selected;
@@ -96,6 +116,10 @@ class _TrackCardState extends State<TrackCard> {
     final down = _selectionDown;
     _selectionDown = null;
     if (down != null &&
+        (event.position - down).distance < playlistDragDistance) {
+      widget.onActivate?.call();
+    }
+    if (down != null &&
         (event.position - down).distance < playlistDragDistance &&
         (widget.selectionMode || _controlAtDown || _shiftAtDown)) {
       _select();
@@ -104,37 +128,11 @@ class _TrackCardState extends State<TrackCard> {
 
   void _select() => widget.onSelect?.call(_controlAtDown, _shiftAtDown);
 
-  @override
-  Widget build(BuildContext context) {
-    final rm = context.rm;
-    final locked = widget.locked;
-    final modded = widget.custom || !locked;
-    final canEdit = !locked && widget.onOpenEditor != null;
-    final badges = _badges(rm);
-
-    final Color bg;
-    final Color border;
-    if (widget.dragging) {
-      bg = rm.accent.bg;
-      border = rm.accent.base;
-    } else if (widget.selected) {
-      bg = rm.accent.bg;
-      border = rm.accent.base;
-    } else if (widget.custom && widget.notConfiguredProgress != null) {
-      bg = rm.warnBg;
-      border = rm.warn.withAlpha(165);
-    } else if (modded) {
-      bg = rm.accent.bg;
-      border = rm.accent.ring;
-    } else if (_hover) {
-      bg = rm.raised;
-      border = rm.border;
-    } else {
-      bg = Colors.transparent;
-      border = Colors.transparent;
-    }
-
-    return Listener(
+  Widget _body(Widget body) {
+    final canEdit =
+        (!widget.locked || widget.allowLockedOpen) &&
+        widget.onOpenEditor != null;
+    final interactive = Listener(
       onPointerDown: _captureModifiers,
       onPointerUp: _selectOnRelease,
       onPointerMove: (event) {
@@ -152,121 +150,189 @@ class _TrackCardState extends State<TrackCard> {
             : () {
                 if (!_controlAtDown && !_shiftAtDown) widget.onOpenEditor!();
               },
-        child: Tooltip(
-          message: locked
+        child: body,
+      ),
+    );
+    return Row(
+      children: [
+        Expanded(child: widget.bodyBuilder?.call(interactive) ?? interactive),
+        if (widget.trailing != null) ...[
+          const SizedBox(width: 3),
+          widget.trailing!,
+        ],
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rm = context.rm;
+    final accent = widget.accentColor ?? rm.accent.base;
+    final locked = widget.locked;
+    final modded = widget.custom || !locked;
+    final badges = _badges(rm);
+
+    final Color bg;
+    final Color border;
+    if (widget.dragging) {
+      bg = accent.withAlpha(25);
+      border = accent;
+    } else if (widget.selected) {
+      bg = accent.withAlpha(25);
+      border = accent;
+    } else if (widget.pending ||
+        widget.custom && widget.notConfiguredProgress != null) {
+      bg = rm.warnBg;
+      border = rm.warn.withAlpha(165);
+    } else if (widget.neutral) {
+      bg = rm.panel;
+      border = rm.border;
+    } else if (modded) {
+      bg = accent.withAlpha(25);
+      border = accent.withAlpha(89);
+    } else if (_hover) {
+      bg = rm.raised;
+      border = rm.border;
+    } else {
+      bg = Colors.transparent;
+      border = Colors.transparent;
+    }
+
+    return RmTooltip(
+      message:
+          widget.tooltip ??
+          (locked
               ? ''
               : widget.onOpenEditor == null
               ? (widget.custom ? '曲目当前不可编辑' : '原版曲目没有本地编辑配置')
               : (widget.onSelect == null
                     ? '双击进入编辑；拖动可调整排序'
-                    : '双击编辑 · Ctrl 多选 · Shift 连选'),
-          waitDuration: const Duration(milliseconds: 450),
-          child: MouseRegion(
-            cursor: locked ? SystemMouseCursors.basic : SystemMouseCursors.grab,
-            onEnter: (_) => setState(() => _hover = true),
-            onExit: (_) => setState(() => _hover = false),
-            child: Opacity(
-              opacity: locked ? 0.8 : 1,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-                decoration: BoxDecoration(
-                  color: bg,
-                  border: Border.all(color: border),
-                  borderRadius: BorderRadius.circular(RmTokens.rSm),
-                ),
-                child: Row(
-                  children: [
-                    if (widget.selectionMode) ...[
-                      SizedBox(
-                        width: 18,
-                        height: 26,
-                        child: Icon(
-                          widget.selected
-                              ? Icons.check_box
-                              : Icons.check_box_outline_blank,
-                          size: 15,
-                          color: widget.selected ? rm.accent.base : rm.fg4,
-                        ),
+                    : '双击编辑 · Ctrl 多选 · Shift 连选')),
+      waitDuration: const Duration(milliseconds: 450),
+      child: MouseRegion(
+        cursor: widget.pending
+            ? SystemMouseCursors.click
+            : locked
+            ? SystemMouseCursors.basic
+            : SystemMouseCursors.grab,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: Opacity(
+          opacity: locked ? 0.8 : 1,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+            decoration: BoxDecoration(
+              color: bg,
+              border: Border.all(color: border),
+              borderRadius: BorderRadius.circular(RmTokens.rSm),
+            ),
+            child: _body(
+              Row(
+                children: [
+                  if (widget.selectionMode) ...[
+                    SizedBox(
+                      width: 18,
+                      height: 26,
+                      child: Icon(
+                        widget.selected
+                            ? Icons.check_box
+                            : Icons.check_box_outline_blank,
+                        size: 15,
+                        color: widget.selected ? accent : rm.fg4,
                       ),
-                      const SizedBox(width: 5),
-                    ] else if (widget.order != null) ...[
-                      SizedBox(
-                        width: 18,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
+                    ),
+                    const SizedBox(width: 5),
+                  ] else if (widget.order != null) ...[
+                    SizedBox(
+                      width: widget.numberOnly
+                          ? (widget.order! >= 1000 ? 28 : 22)
+                          : 18,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (!widget.numberOnly)
                             RmIcon(
-                              locked ? 'lock' : 'drag',
+                              widget.pending
+                                  ? 'plus'
+                                  : locked
+                                  ? 'lock'
+                                  : 'drag',
                               size: 9,
                               color: rm.fg4,
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              widget.order.toString().padLeft(2, '0'),
-                              style: RmText.mono(9, color: rm.fg3),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                    ] else ...[
-                      RmIcon(
-                        locked ? 'lock' : 'drag',
-                        size: locked ? 10 : 12,
-                        color: rm.fg4,
-                      ),
-                      const SizedBox(width: 6),
-                    ],
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  widget.title,
-                                  style: RmText.sans(
-                                    12.5,
-                                    weight: FontWeight.w500,
-                                    color:
-                                        widget.custom &&
-                                            widget.notConfiguredProgress != null
-                                        ? rm.warn
-                                        : modded
-                                        ? rm.accent.base
-                                        : (locked ? rm.fg2 : rm.fg),
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
+                          if (!widget.numberOnly) const SizedBox(height: 2),
                           Text(
-                            widget.artist,
-                            style: RmText.sans(
-                              11,
-                              color: locked ? rm.fg4 : rm.fg3,
+                            widget.order.toString().padLeft(2, '0'),
+                            style: RmText.mono(
+                              widget.numberOnly ? 11 : 9,
+                              color: rm.fg3,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
-                          if (badges.isNotEmpty) ...[
-                            const SizedBox(height: 3),
-                            Wrap(spacing: 4, runSpacing: 3, children: badges),
-                          ],
                         ],
                       ),
                     ),
+                    const SizedBox(width: 5),
+                  ] else ...[
+                    RmIcon(
+                      locked ? 'lock' : 'drag',
+                      size: locked ? 10 : 12,
+                      color: rm.fg4,
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                widget.title,
+                                style: RmText.sans(
+                                  12.5,
+                                  weight: FontWeight.w500,
+                                  color:
+                                      widget.pending ||
+                                          widget.custom &&
+                                              widget.notConfiguredProgress !=
+                                                  null
+                                      ? rm.warn
+                                      : modded
+                                      ? accent
+                                      : (locked ? rm.fg2 : rm.fg),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.artist,
+                          style: RmText.sans(
+                            11,
+                            color: locked ? rm.fg4 : rm.fg3,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (badges.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Wrap(spacing: 4, runSpacing: 3, children: badges),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (widget.showDuration) ...[
                     const SizedBox(width: 5),
                     Text(
                       _short(widget.durationSec),
                       style: RmText.mono(10.5, color: rm.fg3),
                     ),
                   ],
-                ),
+                ],
               ),
             ),
           ),

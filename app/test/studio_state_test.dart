@@ -1328,6 +1328,7 @@ Created AI model manifest scaffold: C:\\FH Radio Studio\\models\\ai_tools_manife
         expect(buildArgs, containsAllInOrder(['--loudness-offset-lu', '3']));
         final plan = PlaylistPlanCodec.decodeJson(
           cli.stdinForCommand('build-package')!,
+          projectDir: projectDir,
         );
         expect(plan.assignments.values.map((item) => item.source).toSet(), {
           source.path,
@@ -1391,8 +1392,73 @@ Created AI model manifest scaffold: C:\\FH Radio Studio\\models\\ai_tools_manife
         expect(buildArgs, containsAllInOrder(['--quality', '100']));
         final plan = PlaylistPlanCodec.decodeJson(
           cli.stdinForCommand('build-package')!,
+          projectDir: projectDir,
         );
         expect(plan.assignments.values.map((item) => item.source).toSet(), {
+          source.path,
+        });
+      },
+    );
+
+    test(
+      'stinger edits rebuild songs with durable project references',
+      () async {
+        final projectDir = p.join(tempRoot.path, 'project');
+        final paths = _writeIntegrityFixture(
+          projectDir,
+          deployedBytes: 'original',
+        );
+        final source = File(
+          p.join(FhRadioStudioProject.sourcesDir(projectDir), 'kept.wav'),
+        )..createSync(recursive: true);
+        _writePackageManifestFile(
+          File(
+            p.join(
+              paths.packageRoot,
+              'package',
+              'fh_radio_studio_package_manifest.json',
+            ),
+          ),
+          source: source.path,
+          radioCode: 'R4',
+          playlistType: 'FreeRoam',
+          slot: 1,
+          loudnessOffsetLu: 3.0,
+        );
+        File(
+          p.join(projectDir, '.fh-radio-studio', 'stingers.json'),
+        ).writeAsStringSync('{}');
+        SharedPreferences.setMockInitialValues({_projectDirKey: projectDir});
+        final prefs = await SharedPreferences.getInstance();
+        final runtime = _testUvRuntime(tempRoot, 'stinger-references');
+        final cli = _RecordingCli(runtime);
+        final controller = _RecordingCliStudioController(prefs, cli);
+        controller.setStateForTest(
+          controller.state.copyWith(repoRoot: runtime.projectRoot),
+        );
+        expect(await controller.buildPackage(loudnessOffsetLu: 3.0), isTrue);
+        final args = cli.commands.singleWhere(
+          (args) => args.first == 'build-package',
+        );
+        expect(args, containsAllInOrder(['--stinger-project', projectDir]));
+        final sent = jsonDecode(cli.stdinForCommand('build-package')!) as Map;
+        final assignments = (sent['assignments'] as List).cast<Map>();
+        expect(assignments, isNotEmpty);
+        expect(
+          assignments.every(
+            (item) => '${item['track_key']}'.startsWith('trkref_'),
+          ),
+          isTrue,
+        );
+        expect(
+          assignments.every((item) => !item.containsKey('source')),
+          isTrue,
+        );
+        final plan = PlaylistPlanCodec.decodeJson(
+          jsonEncode(sent),
+          projectDir: projectDir,
+        );
+        expect(plan.assignments.values.map((a) => a.source).toSet(), {
           source.path,
         });
       },

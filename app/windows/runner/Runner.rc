@@ -90,7 +90,7 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.pzzzzz" "\0"
-            VALUE "FileDescription", "FH Radio Studio" "\0"
+            VALUE "FileDescription", "FH Audio Studio" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "fh-radio-studio" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.pzzzzz. All rights reserved." "\0"

@@ -26,6 +26,9 @@ class PlaylistColumn extends StatefulWidget {
     required this.children,
     this.emptyText,
     this.filterControls,
+    this.metadata,
+    this.fitContents = false,
+    this.metadataPadding = const EdgeInsets.fromLTRB(8, 4, 8, 6),
   }) : itemCount = children.length,
        itemBuilder = null;
 
@@ -37,6 +40,9 @@ class PlaylistColumn extends StatefulWidget {
     required this.itemBuilder,
     this.emptyText,
     this.filterControls,
+    this.metadata,
+    this.fitContents = false,
+    this.metadataPadding = const EdgeInsets.fromLTRB(8, 4, 8, 6),
   }) : children = const [];
 
   /// 普通电台列 (custom or builtin)
@@ -56,7 +62,7 @@ class PlaylistColumn extends StatefulWidget {
   }) {
     return PlaylistColumn(
       kind: isCustom ? ColumnKind.customRadio : ColumnKind.builtinRadio,
-      header: _RadioHeader(
+      header: RadioColumnHeader(
         radio: radio,
         isCustom: isCustom,
         count: count,
@@ -91,7 +97,7 @@ class PlaylistColumn extends StatefulWidget {
     Widget? filterControls,
   }) => PlaylistColumn.builder(
     kind: isCustom ? ColumnKind.customRadio : ColumnKind.builtinRadio,
-    header: _RadioHeader(
+    header: RadioColumnHeader(
       radio: radio,
       isCustom: isCustom,
       count: count,
@@ -118,7 +124,7 @@ class PlaylistColumn extends StatefulWidget {
   }) {
     return PlaylistColumn.builder(
       kind: ColumnKind.pool,
-      header: _PoolHeader(count: count),
+      header: PlaylistPoolHeader(count: count),
       emptyText: '没有导入歌曲',
       itemCount: itemCount,
       itemBuilder: itemBuilder,
@@ -126,6 +132,7 @@ class PlaylistColumn extends StatefulWidget {
     );
   }
 
+  final bool fitContents;
   final ColumnKind kind;
   final Widget header;
   final List<Widget> children;
@@ -133,6 +140,8 @@ class PlaylistColumn extends StatefulWidget {
   final IndexedWidgetBuilder? itemBuilder;
   final String? emptyText;
   final Widget? filterControls;
+  final Widget? metadata;
+  final EdgeInsets metadataPadding;
 
   @override
   State<PlaylistColumn> createState() => _PlaylistColumnState();
@@ -154,8 +163,8 @@ class _PlaylistColumnState extends State<PlaylistColumn> {
 
     final Color bg = pool ? rm.raised : rm.panel;
     final pending =
-        widget.header is _RadioHeader &&
-        (widget.header as _RadioHeader).pendingCount > 0;
+        widget.header is RadioColumnHeader &&
+        (widget.header as RadioColumnHeader).pendingCount > 0;
     final Color borderColor = pool
         ? Colors.transparent
         : pending
@@ -194,44 +203,60 @@ class _PlaylistColumnState extends State<PlaylistColumn> {
                 child: widget.header,
               ),
               Container(
-                padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+                padding: widget.metadataPadding,
                 decoration: BoxDecoration(
                   border: Border(bottom: BorderSide(color: rm.border)),
                 ),
                 child: _meta(context),
               ),
               if (widget.filterControls != null) widget.filterControls!,
-              Expanded(
-                child: Padding(
+              if (widget.fitContents)
+                Padding(
                   padding: const EdgeInsets.all(8),
-                  child: SmoothScrollToTop(
-                    controller: _scroll,
-                    enabled: pool,
-                    compact: true,
-                    bottom: 18,
-                    child: ContainedScroll(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (var i = 0; i < widget.itemCount; i++) ...[
+                        if (i > 0) const SizedBox(height: 4),
+                        widget.itemBuilder?.call(context, i) ??
+                            widget.children[i],
+                      ],
+                    ],
+                  ),
+                )
+              else
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: SmoothScrollToTop(
                       controller: _scroll,
-                      child: widget.itemCount == 0
-                          ? _empty(context)
-                          : ListView.separated(
-                              primary: false,
-                              controller: _scroll,
-                              physics: const ClampingScrollPhysics(),
-                              itemCount: widget.itemCount,
-                              separatorBuilder: (_, _) =>
-                                  const SizedBox(height: 4),
-                              itemBuilder: (context, i) {
-                                final itemBuilder = widget.itemBuilder;
-                                if (itemBuilder != null) {
-                                  return itemBuilder(context, i);
-                                }
-                                return widget.children[i];
-                              },
-                            ),
+                      enabled: pool,
+                      compact: true,
+                      bottom: 18,
+                      child: ContainedScroll(
+                        controller: _scroll,
+                        child: widget.itemCount == 0
+                            ? _empty(context)
+                            : ListView.separated(
+                                primary: false,
+                                controller: _scroll,
+                                physics: const ClampingScrollPhysics(),
+                                itemCount: widget.itemCount,
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(height: 4),
+                                itemBuilder: (context, i) {
+                                  final itemBuilder = widget.itemBuilder;
+                                  if (itemBuilder != null) {
+                                    return itemBuilder(context, i);
+                                  }
+                                  return widget.children[i];
+                                },
+                              ),
+                      ),
                     ),
                   ),
                 ),
-              ),
             ],
           ),
         ],
@@ -250,8 +275,9 @@ class _PlaylistColumnState extends State<PlaylistColumn> {
 
   Widget _meta(BuildContext context) {
     final rm = context.rm;
-    if (widget.header is _RadioHeader) {
-      final header = widget.header as _RadioHeader;
+    if (widget.metadata != null) return widget.metadata!;
+    if (widget.header is RadioColumnHeader) {
+      final header = widget.header as RadioColumnHeader;
       final count = header.expanded || header.capacity == 4096
           ? '${header.count} 首 · 原有 ${header.originalCount} 首 · 扩容'
           : '${header.count} / ${header.capacity}';
@@ -276,7 +302,7 @@ class _PlaylistColumnState extends State<PlaylistColumn> {
       );
     }
     return Text(
-      '${(widget.header as _PoolHeader).count} 首',
+      '${(widget.header as PlaylistPoolHeader).count} 首',
       style: RmText.mono(10.5, color: rm.fg3),
     );
   }
@@ -296,8 +322,9 @@ class _PlaylistColumnState extends State<PlaylistColumn> {
   }
 }
 
-class _RadioHeader extends StatelessWidget {
-  const _RadioHeader({
+class RadioColumnHeader extends StatelessWidget {
+  const RadioColumnHeader({
+    super.key,
     required this.radio,
     required this.isCustom,
     required this.count,
@@ -309,8 +336,10 @@ class _RadioHeader extends StatelessWidget {
     this.headerActionLabel,
     this.headerActionTooltip,
     this.onHeaderAction,
+    this.restoreTooltip = '恢复当前列表为 builtin',
   });
 
+  final String restoreTooltip;
   final RadioStation radio;
   final bool isCustom;
   final int count;
@@ -402,7 +431,7 @@ class _RadioHeader extends StatelessWidget {
                 onPressed: onRestoreBuiltin,
                 icon: const RmIcon('undo', size: 12),
                 variant: RmButtonVariant.ghost,
-                tooltip: '恢复当前列表为 builtin',
+                tooltip: restoreTooltip,
               ),
             ],
           ],
@@ -434,9 +463,15 @@ class _RadioHeader extends StatelessWidget {
   }
 }
 
-class _PoolHeader extends StatelessWidget {
-  const _PoolHeader({required this.count});
+class PlaylistPoolHeader extends StatelessWidget {
+  const PlaylistPoolHeader({
+    super.key,
+    required this.count,
+    this.title = '池子',
+    this.subtitle = '全部曲目 · 配置完善靠前',
+  });
   final int count;
+  final String title, subtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -464,17 +499,14 @@ class _PoolHeader extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '池子',
+                    title,
                     style: RmText.sans(
                       13,
                       weight: FontWeight.w600,
                       color: rm.fg,
                     ),
                   ),
-                  Text(
-                    '全部曲目 · 配置完善靠前',
-                    style: RmText.mono(10.5, color: rm.fg3),
-                  ),
+                  Text(subtitle, style: RmText.mono(10.5, color: rm.fg3)),
                 ],
               ),
             ),

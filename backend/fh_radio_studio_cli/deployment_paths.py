@@ -2,7 +2,7 @@
 
 from pathlib import Path, PurePosixPath
 
-from .common import CliError
+from .common import CliError, md5_file
 
 
 def deployment_relative_path(package_path: str, target_root: str = "mediapc") -> str:
@@ -40,3 +40,18 @@ def contained_game_path(game_dir: Path, relative_path: str) -> Path:
 def effective_game_file(game_dir: Path, media_path: str) -> Path:
     overlay = contained_game_path(game_dir, deployment_relative_path(media_path))
     return overlay if overlay.is_file() else contained_game_path(game_dir, media_path)
+
+
+def owned_overlay_for_media_write(game_dir: Path, media_path: str, ownership: dict) -> Path | None:
+    """A media write must not remain shadowed by, or remove, another mod's file."""
+    relative = deployment_relative_path(media_path, "mediapc")
+    overlay = contained_game_path(game_dir, relative)
+    if not overlay.exists():
+        return None
+    digest = md5_file(overlay)
+    if digest is None or ownership.get(relative) != digest:
+        raise CliError(
+            f"{relative} would shadow the media write and is not owned by the last deployment. "
+            "Use mediapc, or remove that conflicting override before writing media."
+        )
+    return overlay

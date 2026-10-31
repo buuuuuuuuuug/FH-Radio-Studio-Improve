@@ -4,10 +4,11 @@ import '../theme/app_theme.dart';
 import '../theme/text_styles.dart';
 import '../theme/tokens.dart';
 import 'rm_button.dart';
+import 'rm_select.dart';
 import 'rm_icon.dart';
 import 'rm_field.dart';
 
-const songBrowseActionWidth = 84.0;
+const songBrowseActionWidth = 90.0;
 
 class SongBrowseControls extends StatefulWidget {
   const SongBrowseControls({
@@ -62,6 +63,19 @@ class _SongBrowseControlsState extends State<SongBrowseControls> {
     ValueChanged<T> change,
     String tooltip,
   ) {
+    if (compact) {
+      return Tooltip(
+        message: tooltip,
+        child: LayoutBuilder(
+          builder: (context, box) => RmSelect<T>(
+            horizontalPadding: box.maxWidth < 86 ? 2 : 10,
+            value: current,
+            items: {for (final item in items) item.$1: item.$2},
+            onChanged: change,
+          ),
+        ),
+      );
+    }
     final rm = context.rm;
     return Tooltip(
       message: '$tooltip：${items.firstWhere((item) => item.$1 == current).$2}',
@@ -220,7 +234,7 @@ class _SongBrowseControlsState extends State<SongBrowseControls> {
     );
     return Padding(
       padding: compact
-          ? const EdgeInsets.fromLTRB(8, 4, 8, 6)
+          ? const EdgeInsets.fromLTRB(8, 4, 8, 0)
           : const EdgeInsets.all(12),
       child: Align(
         alignment: Alignment.centerLeft,
@@ -243,7 +257,7 @@ class _SongBrowseControlsState extends State<SongBrowseControls> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 5),
                       Row(
                         children: [
                           if (showStatus) ...[

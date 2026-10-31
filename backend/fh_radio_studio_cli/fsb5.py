@@ -22,7 +22,7 @@ class FSB5Info:
     samples: List[FSB5Sample]
 
 
-def parse_fsb5_bytes(raw: bytes) -> FSB5Info:
+def parse_fsb5_bytes(raw: bytes, *, max_samples: int = FSB5_MAX_SAMPLES) -> FSB5Info:
     offset = raw.find(b"FSB5")
     if offset < 0:
         die("FSB5 chunk not found inside bank")
@@ -34,8 +34,8 @@ def parse_fsb5_bytes(raw: bytes) -> FSB5Info:
     )
     if magic != b"FSB5":
         die(f"FSB5 magic mismatch at {offset}: {magic!r}")
-    if not (0 < num_samples <= FSB5_MAX_SAMPLES):
-        die(f"FSB5 sample count {num_samples} is outside 1..{FSB5_MAX_SAMPLES}")
+    if not (0 < num_samples <= max_samples):
+        die(f"FSB5 sample count {num_samples} is outside 1..{max_samples}")
 
     total_size = FSB5_HEADER_SIZE + sh_size + nt_size + sd_size
     if offset + total_size > len(raw):

@@ -7,12 +7,24 @@ import '../theme/text_styles.dart';
 import 'rm_button.dart';
 
 class PlaylistLayoutControls extends ConsumerWidget {
-  const PlaylistLayoutControls({super.key, required this.availableRadioWidth});
+  const PlaylistLayoutControls({
+    super.key,
+    required this.availableRadioWidth,
+    this.showHeight = true,
+    this.topSpacing = 10,
+    this.controllerProvider,
+  });
   final double availableRadioWidth;
+  final bool showHeight;
+  final double topSpacing;
+  final StateNotifierProvider<LayoutOptionsController, LayoutOptions>?
+  controllerProvider;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final options = ref.watch(layoutOptionsProvider);
-    final ctl = ref.read(layoutOptionsProvider.notifier);
+    final provider = controllerProvider ?? layoutOptionsProvider;
+    final options = ref.watch(provider);
+    final ctl = ref.read(provider.notifier);
+    final defaultHeight = ctl.defaultRadioHeight;
     final rm = context.rm;
     final maxColumns = LayoutOptions.maxColumnsFor(availableRadioWidth);
     final effective = options.columnsFor(availableRadioWidth);
@@ -71,6 +83,15 @@ class PlaylistLayoutControls extends ConsumerWidget {
         ),
       ],
     );
+    if (!showHeight) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: SizedBox(width: 280, child: columns),
+        ),
+      );
+    }
     final modes = Wrap(
       spacing: 6,
       runSpacing: 6,
@@ -132,7 +153,11 @@ class PlaylistLayoutControls extends ConsumerWidget {
                   ),
                   Positioned(
                     left:
-                        10 + (c.maxWidth - 20) * (480 - 160) / (1200 - 160) - 2,
+                        10 +
+                        (c.maxWidth - 20) *
+                            (defaultHeight - 160) /
+                            (1200 - 160) -
+                        2,
                     top: 11,
                     child: IgnorePointer(
                       child: Container(
@@ -153,13 +178,13 @@ class PlaylistLayoutControls extends ConsumerWidget {
         ),
         RmButton.icon(
           icon: const Icon(Icons.restart_alt, size: 14),
-          tooltip: '恢复默认高度 · 480 px',
-          onPressed: () => ctl.setRadioHeight(480),
+          tooltip: '恢复默认高度 · ${defaultHeight.round()} px',
+          onPressed: () => ctl.setRadioHeight(defaultHeight),
         ),
       ],
     );
     return Padding(
-      padding: const EdgeInsets.only(top: 10),
+      padding: EdgeInsets.only(top: topSpacing),
       child: LayoutBuilder(
         builder: (context, c) {
           final heightControls = c.maxWidth >= 680

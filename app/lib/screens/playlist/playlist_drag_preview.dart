@@ -6,13 +6,26 @@ import '../../theme/tokens.dart';
 import 'track_card.dart';
 
 class PlaylistDragPreview extends StatelessWidget {
-  const PlaylistDragPreview({super.key, required this.tracks});
+  const PlaylistDragPreview({
+    super.key,
+    this.tracks = const [],
+    this.cards,
+    this.itemNoun = '首歌曲',
+  });
   final List<PoolTrack> tracks;
+  final List<Widget>? cards;
+  final String itemNoun;
   @override
   Widget build(BuildContext context) {
     final rm = context.rm;
     final available = MediaQuery.sizeOf(context).height * .65;
-    final visible = tracks
+    final items =
+        cards ??
+        [
+          for (final track in tracks)
+            TrackCard.fromPoolTrack(track, dragging: true),
+        ];
+    final visible = items
         .take(((available - 42) / 54).floor().clamp(1, 8))
         .toList();
     return Material(
@@ -26,14 +39,14 @@ class PlaylistDragPreview extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (tracks.length > 1)
+            if (items.length > 1)
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: 8,
                 ),
                 child: Text(
-                  '移动 ${tracks.length} 首歌曲',
+                  '移动 ${items.length} $itemNoun',
                   style: RmText.sans(
                     12,
                     weight: FontWeight.w600,
@@ -41,16 +54,16 @@ class PlaylistDragPreview extends StatelessWidget {
                   ),
                 ),
               ),
-            for (final track in visible)
+            for (final card in visible)
               Padding(
                 padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
-                child: TrackCard.fromPoolTrack(track, dragging: true),
+                child: card,
               ),
-            if (visible.length < tracks.length)
+            if (visible.length < items.length)
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 2, 12, 10),
                 child: Text(
-                  '另 ${tracks.length - visible.length} 首一起移动',
+                  '另 ${items.length - visible.length} 个一起移动',
                   style: RmText.sans(11, color: rm.fg3),
                 ),
               ),

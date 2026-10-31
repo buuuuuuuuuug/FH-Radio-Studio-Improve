@@ -129,7 +129,7 @@ void main() {
   testWidgets(
     'zoomed manual waveform maps clicks to the visible absolute time',
     (tester) async {
-      double? placed;
+      double? placed, seeked;
       await tester.pumpWidget(
         MaterialApp(
           theme: buildAppTheme(
@@ -149,6 +149,7 @@ void main() {
               free: true,
               locked: false,
               onPlace: (seconds, {required isMove}) => placed = seconds,
+              onSeek: (seconds) => seeked = seconds,
             ),
           ),
         ),
@@ -156,6 +157,13 @@ void main() {
       final waveform = find.byType(ManualFocusWaveform);
       final rect = tester.getRect(waveform);
       await tester.tapAt(Offset(rect.left + rect.width * .25, rect.top + 65));
+      expect(seeked, closeTo(67.5, .01));
+      expect(placed, isNull);
+      final right = await tester.startGesture(
+        Offset(rect.left + rect.width * .25, rect.top + 65),
+        buttons: 2,
+      );
+      await right.up();
       expect(placed, closeTo(67.5, .01));
       expect(tester.takeException(), isNull);
     },

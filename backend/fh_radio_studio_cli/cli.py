@@ -30,9 +30,11 @@ from .radio_xml import cmd_patch_xml
 from .reconstruct_plan import cmd_reconstruct_plan
 from .seamless_loop import cmd_seamless_loops
 from .status import cmd_status
+from .stingers import cmd_stingers
 from .timing_import import cmd_export_timings, cmd_import_timings
 from .toolchain import PROFILES as TOOLCHAIN_PROFILES
 from .toolchain import cmd_toolchain_status
+from .voices import cmd_voices
 from .waveform import cmd_waveform_audio
 
 
@@ -72,6 +74,82 @@ def add_common_game_arg(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="FH Radio Studio staging CLI")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    voices = sub.add_parser(
+        "voices", help="Scan, back up and replace individual game voice samples"
+    )
+    voices.add_argument(
+        "action",
+        choices=[
+            "scan",
+            "prepare",
+            "import",
+            "save",
+            "original",
+            "preview",
+            "asset",
+            "asset-info",
+            "update-asset",
+            "decode-all",
+            "folders",
+            "forget",
+            "build-preview",
+            "build",
+            "deployment-preview",
+            "deploy",
+            "inspect",
+            "export-text",
+            "extract-assets",
+            "remove-assets",
+            "serve",
+        ],
+    )
+    voices.add_argument("--project-dir", required=True)
+    voices.add_argument("--game-dir", required=True)
+    voices.add_argument("--source")
+    voices.add_argument("--bank-id")
+    voices.add_argument("--index", type=int, default=0)
+    voices.add_argument("--asset-id")
+    voices.add_argument("--paths", nargs="*", default=[])
+    voices.add_argument("--input-json")
+    voices.add_argument("--ffmpeg")
+    voices.add_argument("--vgmstream-cli")
+    voices.set_defaults(func=cmd_voices)
+
+    stingers = sub.add_parser("stingers", help="Project-local radio stinger editing and audition")
+    stingers.add_argument(
+        "action",
+        choices=[
+            "catalog",
+            "warm-cache",
+            "organize",
+            "import",
+            "update",
+            "remove-asset",
+            "original",
+            "preview",
+            "asset",
+            "seam",
+            "asset-preview",
+            "update-asset",
+            "set-assignments",
+            "restore-draft",
+            "serve",
+            "copy-game",
+            "copy-game-draft",
+        ],
+    )
+    add_common_game_arg(stingers)
+    stingers.add_argument("--project-dir", required=True)
+    stingers.add_argument("--locale", default="JP")
+    stingers.add_argument("--paths", nargs="*", default=[])
+    stingers.add_argument("--slot")
+    stingers.add_argument("--asset-id")
+    stingers.add_argument("--current-game", action="store_true")
+    stingers.add_argument("--progress-jsonl", action="store_true")
+    stingers.add_argument("--ffmpeg")
+    stingers.add_argument("--vgmstream-cli")
+    stingers.set_defaults(func=cmd_stingers)
 
     probe = sub.add_parser(
         "probe", help="Validate game/audio directory and summarize FH6 radio files"
@@ -417,6 +495,15 @@ def build_parser() -> argparse.ArgumentParser:
         "music", nargs="*", help="Music files or directories to pack into the target bank"
     )
     package.add_argument("--out-dir", required=True, help="Output package directory")
+    package.add_argument(
+        "--stinger-project", help="Merge this project's frozen stinger draft into the same package"
+    )
+    package.add_argument(
+        "--stinger-gain-db",
+        type=float,
+        default=0.0,
+        help="Additional gain for custom stingers (-6 to +6 dB)",
+    )
     package.add_argument("--defer-publish", action="store_true", help=argparse.SUPPRESS)
     package.add_argument(
         "--reuse-package", help="Previous completed package for unchanged radio bank reuse"
@@ -582,6 +669,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_common_game_arg(baseline_apply)
     baseline_apply.add_argument("--baseline-dir", required=True)
+    baseline_apply.add_argument(
+        "--last-applied-manifest",
+        help="Ownership fingerprints used to remove only this project's matching overrides",
+    )
     baseline_apply.add_argument("--yes", action="store_true")
     baseline_apply.set_defaults(func=cmd_baseline)
     baseline_bump = baseline_sub.add_parser(
@@ -628,6 +719,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--yes",
         action="store_true",
         help="Actually copy files. Without this, only prints a dry run.",
+    )
+    deploy.add_argument(
+        "--json",
+        action="store_true",
+        help="Read-only JSON preview of the validated write plan; cannot be combined with --yes",
+    )
+    deploy.add_argument(
+        "--exclude-file",
+        action="append",
+        default=[],
+        help="Omit one canonical package resource or auxiliary selection ID; repeatable",
     )
     deploy.set_defaults(func=cmd_deploy_package)
 

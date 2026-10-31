@@ -7,12 +7,14 @@ List<double> waveformDisplayEnvelope(
   required double duration,
   double windowStart = 0,
   double? windowEnd,
+  int maximumBars = 512,
 }) {
   final envelope = waveformEnvelope(
     values,
     duration: duration,
     windowStart: windowStart,
     windowEnd: windowEnd,
+    maximumBars: maximumBars,
   );
   final peak = envelope.fold<double>(0, math.max);
   if (peak <= 1e-9) return envelope;
@@ -26,6 +28,7 @@ List<double> waveformEnvelope(
   required double duration,
   double windowStart = 0,
   double? windowEnd,
+  int maximumBars = 512,
 }) {
   if (values.isEmpty || duration <= 0) return const [];
   final start = (windowStart / duration * values.length).floor().clamp(
@@ -36,7 +39,7 @@ List<double> waveformEnvelope(
     start + 1,
     values.length,
   );
-  final count = math.min(512, end - start);
+  final count = math.min(math.max(1, maximumBars), end - start);
   return List.generate(count, (i) {
     final first = start + i * (end - start) ~/ count;
     final last = start + (i + 1) * (end - start) ~/ count;

@@ -178,6 +178,11 @@ def atomic_package_build(function):
 
     @wraps(function)
     def publish(args):
+        from .stingers import freeze_for_build
+
+        frozen_stingers = freeze_for_build(args)
+        # General voices have their own package; song/stinger publishing stays separate.
+        frozen_voices = None
         target = Path(args.out_dir).expanduser().absolute()
         check_target(target)
         manifest = target / "package/fh_radio_studio_package_manifest.json"
@@ -195,6 +200,8 @@ def atomic_package_build(function):
             return owned_sibling(target, path)
 
         clone = argparse.Namespace(**vars(args))
+        clone._stinger_snapshot = frozen_stingers
+        clone._voice_snapshot = frozen_voices
         clone.out_dir = str(stage)
         clone._publish_out_dir = str(target)
         ready = completed_packages(target)
@@ -208,6 +215,14 @@ def atomic_package_build(function):
             result = function(clone)
             if result != 0:
                 return result
+            if clone._stinger_snapshot is not None or frozen_voices is not None:
+                from .package_delta import finalize_changed_files, prepare_radioinfo_base
+                from .stingers import compose_package
+
+                prepare_radioinfo_base(clone)
+                if clone._stinger_snapshot is not None:
+                    compose_package(clone)
+                finalize_changed_files(clone)
             if not (stage / "package/fh_radio_studio_package_manifest.json").is_file():
                 raise CliError("构建未生成完整准备包清单，已保留旧准备包")
             mark_complete(target, stage)

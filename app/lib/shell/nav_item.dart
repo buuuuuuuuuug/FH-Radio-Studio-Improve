@@ -25,7 +25,9 @@ const List<NavSpec> kNavItems = [
   NavSpec(id: 'dashboard', label: '概览', icon: 'dashboard'),
   NavSpec(id: 'pool', label: '自建歌曲', icon: 'music', group: '内容'),
   NavSpec(id: 'playlist', label: '播放列表', icon: 'list', group: '内容'),
+  NavSpec(id: 'stingers', label: '电台台呼', icon: 'music', group: '内容'),
   NavSpec(id: 'siren', label: '塞壬唱片', icon: 'spark', group: '工具'),
+  NavSpec(id: 'voices', label: '语音替换', icon: 'volume', group: '工具'),
 ];
 
 /// Sidebar 一行 nav-item，按 spec：

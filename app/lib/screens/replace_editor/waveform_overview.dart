@@ -1,3 +1,4 @@
+import '../../widgets/rm_tooltip.dart';
 import '../../domain/replacement_models.dart';
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
@@ -12,9 +13,11 @@ class WaveformOverview extends StatefulWidget {
     required this.windowStart,
     required this.windowEnd,
     required this.onWindowStart,
+    this.height = 38,
   });
   final WaveformBars bars;
   final double duration, windowStart, windowEnd;
+  final double height;
   final ValueChanged<double> onWindowStart;
   @override
   State<WaveformOverview> createState() => _WaveformOverviewState();
@@ -36,11 +39,11 @@ class _WaveformOverviewState extends State<WaveformOverview> {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: 38,
+    height: widget.height,
     child: LayoutBuilder(
       builder: (context, c) {
         final scale = c.maxWidth > 0 ? widget.duration / c.maxWidth : 0.0;
-        return Tooltip(
+        return RmTooltip(
           message: '全曲概览 · 高亮框为当前范围；点击或拖动查看其他位置',
           child: MouseRegion(
             cursor: _enabled
@@ -68,7 +71,7 @@ class _WaveformOverviewState extends State<WaveformOverview> {
               onHorizontalDragCancel: () => _dragX = null,
               child: RepaintBoundary(
                 child: CustomPaint(
-                  size: Size(c.maxWidth, 38),
+                  size: Size(c.maxWidth, widget.height),
                   painter: ZoomStripPainter(
                     rm: context.rm,
                     bars: widget.bars,

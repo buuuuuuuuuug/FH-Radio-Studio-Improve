@@ -144,6 +144,8 @@ class AppShell extends ConsumerWidget {
     if (location.startsWith('/pool')) return 'pool';
     if (location.startsWith('/siren')) return 'siren';
     if (location.startsWith('/playlist')) return 'playlist';
+    if (location.startsWith('/voices')) return 'voices';
+    if (location.startsWith('/stingers')) return 'stingers';
     if (location.startsWith('/editor')) return 'pool';
     if (location.startsWith('/settings')) return 'settings';
     return 'dashboard';

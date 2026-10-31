@@ -4,8 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
-const appDisplayName = 'FH Radio Studio · 循环分析实验版';
-const fallbackAppReleaseId = '0.2.1-preview.4+88';
+const appDisplayName = 'FH Audio Studio';
+const fallbackAppReleaseId = '1.0.0-preview.1+90';
 const noneBuildCommitSha256 = 'None';
 
 const _definedReleaseId = String.fromEnvironment('FH_RADIO_STUDIO_RELEASE_ID');

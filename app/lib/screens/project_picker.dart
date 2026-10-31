@@ -98,7 +98,7 @@ class _ProjectPickerScreenState extends ConsumerState<ProjectPickerScreen> {
                         onTap: projectActionsEnabled
                             ? () => _pickProject(
                                 cli.projectDir,
-                                title: '新建 FH Radio Studio 项目目录',
+                                title: '新建 FH Audio Studio 项目目录',
                                 includeDemo: true,
                               )
                             : null,
@@ -109,11 +109,11 @@ class _ProjectPickerScreenState extends ConsumerState<ProjectPickerScreen> {
                       child: _BootCard(
                         icon: 'import',
                         title: '打开项目目录',
-                        body: '打开已有 FH Radio Studio 项目目录，或把普通文件夹初始化成项目。',
+                        body: '打开已有 FH Audio Studio 项目目录，或把普通文件夹初始化成项目。',
                         onTap: projectActionsEnabled
                             ? () => _pickProject(
                                 cli.projectDir,
-                                title: '打开 FH Radio Studio 项目目录',
+                                title: '打开 FH Audio Studio 项目目录',
                               )
                             : null,
                       ),
@@ -238,7 +238,7 @@ class _ProjectPickerScreenState extends ConsumerState<ProjectPickerScreen> {
 
   Future<void> _relocateRecentProject(String oldPath) async {
     final selected = await _chooseDirectory(
-      title: '重新定位 FH Radio Studio 项目目录',
+      title: '重新定位 FH Audio Studio 项目目录',
       initialDirectory: _existingDirectoryForPicker(oldPath),
     );
     if (!mounted || selected == null || !_canChangeProject()) return;
@@ -369,7 +369,7 @@ class _ProjectPickerScreenState extends ConsumerState<ProjectPickerScreen> {
       children: [
         const BootLogoMark(size: 30),
         const SizedBox(width: 12),
-        Text('FH Radio Studio', style: RmText.bootLogo(color: rm.fg)),
+        Text('FH Audio Studio', style: RmText.bootLogo(color: rm.fg)),
         const SizedBox(width: 6),
         Padding(
           padding: const EdgeInsets.only(top: 6),
@@ -404,7 +404,7 @@ class _ProjectPickerScreenState extends ConsumerState<ProjectPickerScreen> {
         children: [
           Expanded(
             child: Text(
-              'FH Radio Studio 不修改账号、存档或在线连接数据。所有写入都会先对照备份，再确认后执行。',
+              'FH Audio Studio 不修改账号、存档或在线连接数据。所有写入都会先对照备份，再确认后执行。',
               style: RmText.mono(11, color: rm.fg3),
             ),
           ),

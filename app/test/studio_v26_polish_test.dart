@@ -33,7 +33,13 @@ void main() {
       final dirty = n.state.dirty;
       n.setPlaying(true);
       n.setPlayhead(150);
-      expect(n.state.zoomStart, closeTo(150 - span * .1, 1e-6));
+      expect(
+        n.state.zoomStart,
+        closeTo(
+          (150 - span * .1).clamp(0, n.state.ai.durationSec - span),
+          1e-6,
+        ),
+      );
       final stationary = (n.state.zoomStart, n.state.zoomEnd);
       n.setPlayhead(151);
       expect((n.state.zoomStart, n.state.zoomEnd), stationary);

@@ -1,3 +1,8 @@
+import '../../widgets/pool_selection_actions.dart';
+import '../../widgets/playlist_toolbar_row.dart';
+import '../../widgets/playlist_search_field.dart';
+import '../../state/unsaved_edits.dart';
+import 'playlist_view_switch.dart';
 import '../../widgets/cross_radio_assignment_notice.dart';
 import '../../widgets/feature_tour.dart';
 import '../../widgets/package_publication_recovery.dart';
@@ -168,8 +173,9 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
         ref.read(playlistCatalogViewProvider) != PlaylistCatalogView.package) {
       return KeyEventResult.ignored;
     }
-    if (event.logicalKey == LogicalKeyboardKey.keyZ) {
-      _restorePlaylistHistory(redo: keyboard.isShiftPressed);
+    if (event.logicalKey == LogicalKeyboardKey.keyZ &&
+        !keyboard.isShiftPressed) {
+      _restorePlaylistHistory(redo: false);
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.keyY &&
@@ -785,6 +791,10 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
   }
 
   Future<void> _preparePackage(BuildContext context) async {
+    if (!await ref.read(unsavedEditsProvider).confirmForBuild(context) ||
+        !context.mounted) {
+      return;
+    }
     final plan = editableAssignmentPlan(ref);
     final radiosMissingScene =
         {
@@ -1050,7 +1060,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                           '${cli.projectEditingLockMessage} 播放列表拖拽、恢复、复制和写包暂时不可用。',
                     ),
                   ],
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 14),
                   if (catalog.failed)
                     Expanded(
                       child: SingleChildScrollView(
@@ -1081,7 +1091,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                       const SizedBox(height: 12),
                     ],
                     _toolbar(context, s, catalog, view, editingPlan, cli),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 14),
                     Expanded(
                       child: _board(
                         context,
@@ -1111,8 +1121,9 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
     PlaylistCatalogView view,
   ) {
     final rm = context.rm;
-    const description =
-        '在“游戏内”查看当前 RadioInfo，只读确认 custom / builtin；在“准备包”编辑下一次要生成的排布。';
+    final description = view == PlaylistCatalogView.package
+        ? '在“准备包”编辑下一次构建的排布，双击自建曲目进入编辑；在“游戏内”查看当前 RadioInfo。'
+        : '查看当前游戏内 RadioInfo，只读确认 custom / builtin；切换到“准备包”编辑下一次构建的排布。';
     final heading = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1143,16 +1154,24 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
       children: [
         OpenPackageFolderButton(path: cli.lastPackageDeployDir),
         RmButton(
-          label: ref.watch(playlistPlanProvider.notifier).dirty
-              ? '保存播放列表 *'
-              : '保存播放列表',
+          key: const ValueKey('playlist-save'),
+          label: '保存播放列表',
           leading: const RmIcon('check', size: 12),
-          onPressed: cli.busy || cli.projectEditingLocked
+          onPressed:
+              cli.busy ||
+                  cli.projectEditingLocked ||
+                  view != PlaylistCatalogView.package ||
+                  (!ref.read(playlistPlanProvider.notifier).dirty &&
+                      ref.read(playlistPlanProvider.notifier).hasUserPlan)
               ? null
               : _savePlaylist,
         ),
         RmButton(
-          onPressed: cli.busy || cli.projectEditingLocked
+          key: const ValueKey('playlist-build'),
+          onPressed:
+              cli.busy ||
+                  cli.projectEditingLocked ||
+                  view != PlaylistCatalogView.package
               ? null
               : () => unawaited(_preparePackageFromUi(context)),
           variant: RmButtonVariant.primary,
@@ -1166,15 +1185,13 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
     );
     return LayoutBuilder(
       builder: (context, c) {
-        if (c.maxWidth >= 780) {
+        if (c.maxWidth > 850) {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(child: heading),
-              if (view == PlaylistCatalogView.package) ...[
-                const SizedBox(width: 16),
-                actions,
-              ],
+              const SizedBox(width: 16),
+              actions,
             ],
           );
         }
@@ -1182,10 +1199,8 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             heading,
-            if (view == PlaylistCatalogView.package) ...[
-              const SizedBox(height: 12),
-              Align(alignment: Alignment.centerLeft, child: actions),
-            ],
+            const SizedBox(height: 12),
+            Align(alignment: Alignment.centerLeft, child: actions),
           ],
         );
       },
@@ -1211,7 +1226,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final viewSwitch = _PlaylistViewSwitch(
+          final viewSwitch = PlaylistViewSwitch(
             value: view,
             onChanged: (value) {
               ref.read(playlistCatalogViewProvider.notifier).state = value;
@@ -1246,59 +1261,11 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
               0.0,
               constraints.maxWidth,
             ),
-            child: TextField(
-              key: const ValueKey('playlist-search'),
+            child: PlaylistSearchField(
               controller: _search,
+              fieldKey: const ValueKey('playlist-search'),
+              clearKey: const ValueKey('playlist-clear-search'),
               onChanged: ref.read(playlistProvider.notifier).setSearch,
-              style: RmText.sans(12.5, color: rm.fg),
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: '搜索歌曲 / 歌手 / 文件名',
-                hintStyle: RmText.sans(12.5, color: rm.fg4),
-                prefixIcon: Padding(
-                  padding: const EdgeInsets.only(left: 10, right: 8),
-                  child: RmIcon('search', size: 13, color: rm.fg3),
-                ),
-                prefixIconConstraints: const BoxConstraints(minWidth: 30),
-                suffixIconConstraints: const BoxConstraints.tightFor(
-                  width: 32,
-                  height: 32,
-                ),
-                suffixIcon: s.search.isEmpty
-                    ? null
-                    : IconButton(
-                        key: const ValueKey('playlist-clear-search'),
-                        tooltip: '清空搜索',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints.tightFor(
-                          width: 32,
-                          height: 32,
-                        ),
-                        icon: Icon(Icons.close, size: 14, color: rm.fg3),
-                        onPressed: () {
-                          _search.clear();
-                          ref.read(playlistProvider.notifier).setSearch('');
-                        },
-                      ),
-                filled: true,
-                fillColor: rm.raised,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 9,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(RmTokens.rSm),
-                  borderSide: BorderSide(color: rm.border),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(RmTokens.rSm),
-                  borderSide: BorderSide(color: rm.border),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(RmTokens.rSm),
-                  borderSide: BorderSide(color: rm.accent.base),
-                ),
-              ),
             ),
           ).tourAnchor('search');
           final Widget? copyAction = view == PlaylistCatalogView.package
@@ -1311,70 +1278,95 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                   tooltip: editingLocked ? cli.projectEditingLockMessage : null,
                 )
               : null;
-          const customChip = RmChip(
-            label: 'custom · 自建',
-            variant: RmChipVariant.accent,
-            showDot: true,
-          );
-          const builtinChip = RmChip(
-            label: 'builtin · 锁定',
-            variant: RmChipVariant.muted,
-            leading: RmIcon('lock', size: 10),
-          );
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Wrap(
-                spacing: 10,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  viewSwitch,
-                  baseChip,
-                  ?copyAction,
-                  if (view == PlaylistCatalogView.package) ...[
-                    RmButton(
-                      key: const ValueKey('playlist-undo'),
-                      size: RmButtonSize.sm,
-                      label: '撤销',
-                      leading: const RmIcon('undo', size: 12),
-                      onPressed:
-                          editingLocked ||
-                              !ref.read(playlistPlanProvider.notifier).canUndo
-                          ? null
-                          : () => _restorePlaylistHistory(redo: false),
-                    ),
-                    RmButton(
-                      key: const ValueKey('playlist-redo'),
-                      size: RmButtonSize.sm,
-                      label: '重做',
-                      leading: const Icon(Icons.redo, size: 12),
-                      onPressed:
-                          editingLocked ||
-                              !ref.read(playlistPlanProvider.notifier).canRedo
-                          ? null
-                          : () => _restorePlaylistHistory(redo: true),
+              PlaylistToolbarRow(
+                leading: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    viewSwitch,
+                    baseChip,
+                    ?copyAction,
+                    const SplitPlaylistSetting(),
+                  ],
+                ),
+                trailing: Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    if (view == PlaylistCatalogView.package)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          RmButton(
+                            key: const ValueKey('playlist-undo'),
+                            label: '撤销',
+                            size: RmButtonSize.sm,
+                            leading: const RmIcon('undo', size: 12),
+                            onPressed:
+                                editingLocked ||
+                                    cli.busy ||
+                                    !ref
+                                        .read(playlistPlanProvider.notifier)
+                                        .canUndo
+                                ? null
+                                : () => _restorePlaylistHistory(redo: false),
+                          ),
+                          const SizedBox(width: 6),
+                          RmButton(
+                            key: const ValueKey('playlist-redo'),
+                            label: '重做',
+                            size: RmButtonSize.sm,
+                            leading: const RmIcon('redo', size: 12),
+                            onPressed:
+                                editingLocked ||
+                                    cli.busy ||
+                                    !ref
+                                        .read(playlistPlanProvider.notifier)
+                                        .canRedo
+                                ? null
+                                : () => _restorePlaylistHistory(redo: true),
+                          ),
+                        ],
+                      ),
+                    RmChip(
+                      key: const ValueKey('playlist-save-status'),
+                      showDot: true,
+                      label: view != PlaylistCatalogView.package
+                          ? '只读查看'
+                          : '${plan.assignments.values.where((a) => a.playlistType == (s.mode == PlaylistMode.event ? 'Event' : 'FreeRoam')).length} 首分配 · ${ref.watch(playlistPlanProvider.notifier).dirty ? '未保存' : '已保存'}',
+                      variant: view != PlaylistCatalogView.package
+                          ? RmChipVariant.muted
+                          : ref.read(playlistPlanProvider.notifier).dirty
+                          ? RmChipVariant.warn
+                          : RmChipVariant.accent,
                     ),
                   ],
-                  const SplitPlaylistSetting(),
-                  if (s.splitPlaylistTypes) segmented,
-                  if (s.splitPlaylistTypes)
+                ),
+              ).tourAnchor('view'),
+              if (s.splitPlaylistTypes) ...[
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    segmented,
                     Text(
                       '分场景编辑 · 实验功能；分别安排漫游和比赛，关闭后保留两套排布。',
-                      style: RmText.sans(12, color: rm.warn),
+                      style: RmText.sans(11.5, color: rm.fg3),
                     ),
-                  if (view == PlaylistCatalogView.package)
-                    Text('双击自建曲目进入编辑', style: RmText.sans(11.5, color: rm.fg3)),
-                ],
-              ).tourAnchor('view'),
+                  ],
+                ),
+              ],
               const SizedBox(height: 10),
-              Wrap(
-                spacing: 10,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [search, customChip, builtinChip],
-              ),
+              PlaylistSearchRow(search: search),
               PlaylistLayoutControls(
+                topSpacing: 2,
                 availableRadioWidth: LayoutOptions.radioWidthFor(
                   constraints.maxWidth + 30,
                   withPool: view == PlaylistCatalogView.package,
@@ -1961,7 +1953,7 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
                   child: Tooltip(
                     message: 'Ctrl 多选 · Shift 连选 · Esc 退出 · 双击编辑',
                     child: Text(
-                      'Ctrl 多选 · Shift 连选 · Esc 退出',
+                      'Ctrl 多选 · Shift 连选',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: RmText.sans(10, color: context.rm.fg3),
@@ -1990,44 +1982,25 @@ class _PlaylistScreenState extends ConsumerState<PlaylistScreen> {
           if (_selecting)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-              child: Row(
+              child: PoolSelectionActions(
                 key: const ValueKey('playlist-selection-actions'),
-                children: [
-                  Expanded(
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          _selectionScope == 'pool'
-                              ? '已选 ${_selection.ids.length}'
-                              : '电台已选 ${_selection.ids.length}',
-                          style: RmText.sans(10.5, color: context.rm.fg3),
-                        ),
-                        RmButton(
-                          size: RmButtonSize.sm,
-                          label: '全选',
-                          onPressed: () {
-                            _selectionScope = 'pool';
-                            _selection = SongSelection(
-                              ids: pool.map((t) => t.id).toSet(),
-                            );
-                          },
-                        ),
-                        RmButton(
-                          size: RmButtonSize.sm,
-                          label: '清空',
-                          onPressed: () => _selection = SongSelection(),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 6),
+                count: _selection.ids.length,
+                label: _selectionScope == 'pool'
+                    ? '已选 ${_selection.ids.length}'
+                    : '电台已选 ${_selection.ids.length}',
+                onSelectAll: () => setState(() {
+                  _selectionScope = 'pool';
+                  _selection = SongSelection(
+                    ids: pool.map((t) => t.id).toSet(),
+                  );
+                }),
+                onClear: () => setState(() => _selection = SongSelection()),
+                actions: [
                   RmButton(
                     key: const ValueKey('playlist-batch-assign'),
                     size: RmButtonSize.sm,
-                    label: '分配到电台',
+                    label: '分配至电台',
+                    horizontalPadding: 8,
                     variant: RmButtonVariant.primary,
                     onPressed:
                         _selectionScope != 'pool' ||
@@ -2279,70 +2252,6 @@ class _DragTargetHoverFrame extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _PlaylistViewSwitch extends StatelessWidget {
-  const _PlaylistViewSwitch({required this.value, required this.onChanged});
-
-  final PlaylistCatalogView value;
-  final ValueChanged<PlaylistCatalogView> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final rm = context.rm;
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: rm.raised,
-        borderRadius: BorderRadius.circular(RmTokens.rSm),
-        border: Border.all(color: rm.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _segment(context, PlaylistCatalogView.game, '游戏内'),
-          _segment(context, PlaylistCatalogView.package, '准备包'),
-        ],
-      ),
-    );
-  }
-
-  Widget _segment(
-    BuildContext context,
-    PlaylistCatalogView option,
-    String label,
-  ) {
-    final rm = context.rm;
-    final active = option == value;
-    final accent = option == PlaylistCatalogView.package
-        ? rm.accent.base
-        : rm.info;
-    final activeBg = option == PlaylistCatalogView.package
-        ? Color.alphaBlend(rm.accent.base.withAlpha(16), rm.hover)
-        : Color.alphaBlend(rm.info.withAlpha(14), rm.hover);
-
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: () => onChanged(option),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-          decoration: BoxDecoration(
-            color: active ? activeBg : Colors.transparent,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Text(
-            label,
-            style: RmText.sans(
-              12,
-              color: active ? accent : rm.fg3,
-              weight: active ? FontWeight.w500 : FontWeight.w400,
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

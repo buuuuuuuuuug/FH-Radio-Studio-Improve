@@ -5,7 +5,7 @@ from time import perf_counter
 
 from .baseline_order import is_baseline_derived_index_path, write_baseline_bank_order_index
 from .common import *
-from .deployment_paths import contained_game_path
+from .deployment_paths import contained_game_path, owned_overlay_for_media_write
 from .file_transaction import (
     game_file_write_lock,
     preserve_directory_on_failure,
@@ -362,7 +362,10 @@ def collect_game_baseline_file_specs(
         )
     bank_dir = audio_dir / "FMODBanks"
     if bank_dir.is_dir():
-        for bank in sorted(bank_dir.glob("R*_Tracks*.assets.bank")):
+        for bank in sorted(
+            set(bank_dir.glob("R*_Tracks*.assets.bank"))
+            | set(bank_dir.glob("R*_Stingers_*.assets.bank"))
+        ):
             specs.append(
                 {
                     "source": bank,
@@ -865,6 +868,13 @@ def cmd_baseline(args: argparse.Namespace) -> int:
             )
             print("Plan:")
             replacements = []
+            owned_overlay_removals = []
+            # Share the same ownership evidence and override checks as normal
+            # deployment. Restoring media alone would leave our active mediapc
+            # resources playing, despite reporting a successful restoration.
+            from .deploy import _last_applied_md5s
+
+            ownership = _last_applied_md5s(getattr(args, "last_applied_manifest", None))
             for item in files:
                 rel_text = str(item.get("relative_path") or "").replace("\\", "/")
                 install_rel_text = str(item.get("install_relative_path") or "").replace("\\", "/")
@@ -884,13 +894,18 @@ def cmd_baseline(args: argparse.Namespace) -> int:
                     )
                 replacements.append((saved, dest, saved_md5))
                 print(f"  {saved} -> {dest}")
+                if install_rel_text.startswith("media/"):
+                    overlay = owned_overlay_for_media_write(game_dir, install_rel_text, ownership)
+                    if overlay is not None:
+                        owned_overlay_removals.append(overlay)
+                        print(f"  remove owned override after restoration: {overlay}")
 
             if not args.yes:
                 print(
                     "\nDry run only. Re-run with --yes to copy baseline files into the game directory."
                 )
                 return 0
-            replace_files_atomically(replacements)
+            replace_files_atomically(replacements, removals=owned_overlay_removals)
             for item in files:
                 print(f"  applied {item['relative_path']}")
 

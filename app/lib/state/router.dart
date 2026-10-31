@@ -1,4 +1,5 @@
 import 'package:go_router/go_router.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'unsaved_edits.dart';
 
@@ -8,7 +9,10 @@ import '../screens/playlist.dart';
 import '../screens/project_picker.dart';
 import '../screens/replace_editor.dart';
 import '../screens/siren_library.dart';
+import '../screens/stingers.dart';
+import '../screens/voice_replacement.dart';
 import '../shell/app_shell.dart';
+import '../widgets/audio_editor_dialog.dart';
 import '../tweaks/tweaks_panel.dart';
 
 /// 路由 id → path。Sidebar/Tabs 用这里。
@@ -19,6 +23,8 @@ class RmRoutes {
   static const pool = '/pool';
   static const siren = '/siren';
   static const playlist = '/playlist';
+  static const stingers = '/stingers';
+  static const voices = '/voices';
   static const settings = '/settings';
   static String editor(String trackId, {bool fromPlaylist = false}) =>
       '/editor/${Uri.encodeComponent(trackId)}${fromPlaylist ? '?from=playlist' : ''}';
@@ -61,6 +67,24 @@ final GoRouter appRouter = GoRouter(
           path: RmRoutes.playlist,
           pageBuilder: (_, _) =>
               const NoTransitionPage(child: PlaylistScreen()),
+        ),
+        GoRoute(
+          path: RmRoutes.voices,
+          pageBuilder: (_, _) => const NoTransitionPage(
+            child: AudioEditorHost(
+              key: ValueKey('voice-editor-host'),
+              child: VoiceReplacementScreen(),
+            ),
+          ),
+        ),
+        GoRoute(
+          path: RmRoutes.stingers,
+          pageBuilder: (_, _) => const NoTransitionPage(
+            child: AudioEditorHost(
+              key: ValueKey('stinger-editor-host'),
+              child: StingersScreen(),
+            ),
+          ),
         ),
         GoRoute(
           path: RmRoutes.editorPath,

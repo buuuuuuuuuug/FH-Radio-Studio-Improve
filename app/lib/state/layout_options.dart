@@ -68,27 +68,35 @@ class LayoutOptions {
 }
 
 class LayoutOptionsController extends StateNotifier<LayoutOptions> {
-  LayoutOptionsController(this.prefs)
-    : super(
-        LayoutOptions(
-          width: prefs.getDouble('layout.width') ?? 0,
-          manualRefineWidth:
-              (prefs.getDouble('layout.manualRefineWidth') ?? 1080).clamp(
-                640,
-                10000,
-              ),
-          radioHeight: (prefs.getDouble('layout.radioHeight') ?? 480).clamp(
-            160,
-            1200,
-          ),
-          radioColumns: _columns(prefs.getInt('layout.radioColumns')),
-          heightMode: RadioHeightMode.values.firstWhere(
-            (mode) => mode.name == prefs.getString('layout.heightMode'),
-            orElse: () => RadioHeightMode.manual,
-          ),
-        ),
-      );
+  LayoutOptionsController(
+    this.prefs, {
+    this.preferencePrefix = 'layout',
+    this.defaultRadioHeight = 480,
+  }) : super(
+         LayoutOptions(
+           width: prefs.getDouble('layout.width') ?? 0,
+           manualRefineWidth:
+               (prefs.getDouble('layout.manualRefineWidth') ?? 1080).clamp(
+                 640,
+                 10000,
+               ),
+           radioHeight:
+               (prefs.getDouble('$preferencePrefix.radioHeight') ??
+                       defaultRadioHeight)
+                   .clamp(160, 1200),
+           radioColumns: _columns(
+             prefs.getInt('$preferencePrefix.radioColumns'),
+           ),
+           heightMode: RadioHeightMode.values.firstWhere(
+             (mode) =>
+                 mode.name == prefs.getString('$preferencePrefix.heightMode'),
+             orElse: () => RadioHeightMode.manual,
+           ),
+         ),
+       );
   final SharedPreferences prefs;
+  final String preferencePrefix;
+  final double defaultRadioHeight;
   Timer? _persistTimer;
   void _schedulePersist() {
     _persistTimer?.cancel();
@@ -96,11 +104,13 @@ class LayoutOptionsController extends StateNotifier<LayoutOptions> {
   }
 
   void _persist() {
-    prefs.setDouble('layout.width', state.width);
-    prefs.setDouble('layout.manualRefineWidth', state.manualRefineWidth);
-    prefs.setDouble('layout.radioHeight', state.radioHeight);
-    prefs.setInt('layout.radioColumns', state.radioColumns);
-    prefs.setString('layout.heightMode', state.heightMode.name);
+    if (preferencePrefix == 'layout') {
+      prefs.setDouble('layout.width', state.width);
+      prefs.setDouble('layout.manualRefineWidth', state.manualRefineWidth);
+    }
+    prefs.setDouble('$preferencePrefix.radioHeight', state.radioHeight);
+    prefs.setInt('$preferencePrefix.radioColumns', state.radioColumns);
+    prefs.setString('$preferencePrefix.heightMode', state.heightMode.name);
   }
 
   @override
@@ -150,4 +160,13 @@ class LayoutOptionsController extends StateNotifier<LayoutOptions> {
 final layoutOptionsProvider =
     StateNotifierProvider<LayoutOptionsController, LayoutOptions>(
       (ref) => LayoutOptionsController(ref.watch(sharedPreferencesProvider)),
+    );
+
+final stingerLayoutOptionsProvider =
+    StateNotifierProvider<LayoutOptionsController, LayoutOptions>(
+      (ref) => LayoutOptionsController(
+        ref.watch(sharedPreferencesProvider),
+        preferencePrefix: 'stinger.layout',
+        defaultRadioHeight: 660,
+      ),
     );

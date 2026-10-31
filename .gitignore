@@ -56,6 +56,7 @@ third_party/
 **/ios/Flutter/.last_build_id
 **/windows/flutter/ephemeral/
 **/macos/Flutter/ephemeral/
+**/linux/flutter/ephemeral/
 **/.widget_preview/
 app.*.symbols
 app.*.map.json
@@ -98,3 +99,4 @@ test/project/
 expansion_protection_inventory.json
 validation/
 local-only/
+.test-temp/

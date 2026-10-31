@@ -28,6 +28,10 @@ class RmIcon extends StatelessWidget {
         return LucideIcons.settings;
       case 'play':
         return LucideIcons.play;
+      case 'stop':
+        return LucideIcons.square;
+      case 'redo':
+        return LucideIcons.rotateCw;
       case 'pause':
         return LucideIcons.pause;
       case 'check':
@@ -40,6 +44,18 @@ class RmIcon extends StatelessWidget {
         return LucideIcons.chevronLeft;
       case 'folder':
         return LucideIcons.folder;
+      case 'folder-plus':
+        return LucideIcons.folderPlus;
+      case 'folder-open':
+        return LucideIcons.folderOpen;
+      case 'pencil':
+        return LucideIcons.pencil;
+      case 'keyboard':
+        return LucideIcons.keyboard;
+      case 'save':
+        return LucideIcons.save;
+      case 'chevron-right':
+        return LucideIcons.chevronRight;
       case 'plus':
         return LucideIcons.plus;
       case 'warn':
@@ -90,6 +106,14 @@ class RmIcon extends StatelessWidget {
         return LucideIcons.music;
       case 'volume':
         return LucideIcons.volume2;
+      case 'volume-x':
+        return LucideIcons.volumeX;
+      case 'waveform':
+        return LucideIcons.audioLines;
+      case 'list-plus':
+        return LucideIcons.listPlus;
+      case 'reset':
+        return LucideIcons.history;
       case 'file':
         return LucideIcons.fileText;
       case 'crosshair':

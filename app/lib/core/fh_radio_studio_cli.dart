@@ -4,6 +4,21 @@ import 'dart:io';
 
 import 'system_proxy.dart';
 
+Map<String, dynamic> localDevelopmentConfig() {
+  if (const bool.fromEnvironment('dart.vm.product')) return const {};
+  try {
+    final file = File(
+      '${File(Platform.resolvedExecutable).parent.path}/local-development.json',
+    );
+    if (!file.existsSync()) return const {};
+    return Map<String, dynamic>.from(
+      jsonDecode(file.readAsStringSync()) as Map,
+    );
+  } on Object {
+    return const {};
+  }
+}
+
 typedef CliLineHandler = void Function(String line);
 
 const fhRadioStudioDefaultPythonVersion = '3.12';
@@ -97,6 +112,12 @@ class FhRadioStudioCli {
   }
 
   static String defaultRepoRoot() {
+    final localSource = localDevelopmentConfig()['source_root'];
+    if (localSource is String &&
+        File('$localSource/pyproject.toml').existsSync() &&
+        Directory('$localSource/backend/fh_radio_studio_cli').existsSync()) {
+      return Directory(localSource).absolute.path;
+    }
     final seeds = <Directory>[
       Directory.current,
       File(Platform.resolvedExecutable).parent,
@@ -132,14 +153,6 @@ class FhRadioStudioCli {
     CliCancellationToken? cancellationToken,
     String? stdinInput,
   }) async {
-    if (args.isNotEmpty && args.first == 'baseline' && args.contains('apply')) {
-      return const CliRunResult(
-        exitCode: 2,
-        stdout: '',
-        stderr: '独立扩容版暂未开放原始备份恢复。',
-        commandLine: '',
-      );
-    }
     return _runUv(
       uvRuntime.cliRunInvocation(
         args,
@@ -235,6 +248,22 @@ class FhRadioStudioCli {
       cancellationToken: cancellationToken,
       stdinInput: stdinInput,
     );
+  }
+
+  /// Long-lived local sessions use the same uv invocation and process tracking.
+  Future<Process> startBaseWorker(List<String> args) async {
+    final invocation = uvRuntime.baseCliRunInvocation(args);
+    final process = await Process.start(
+      invocation.executable,
+      invocation.args,
+      workingDirectory: invocation.workingDirectory,
+      runInShell: false,
+      environment: invocation.environment,
+    );
+    final active = _ActiveCliProcess(process);
+    _activeProcesses.add(active);
+    unawaited(process.exitCode.then((_) => _activeProcesses.remove(active)));
+    return process;
   }
 
   Future<CliRunResult> syncRepairEnvironment({
@@ -755,6 +784,7 @@ class UvRuntime {
     final uv =
         Platform.environment['FH_RADIO_STUDIO_DEV_UV_EXE'] ??
         Platform.environment['FH_RADIO_STUDIO_UV_EXE'] ??
+        (localDevelopmentConfig()['uv_executable'] as String?) ??
         'uv';
     final toolchainHome =
         Platform.environment['FH_RADIO_STUDIO_DEV_TOOLCHAIN_HOME'] ??
@@ -762,7 +792,8 @@ class UvRuntime {
         _join(repoRoot, '.fh-radio-studio-dev', 'toolchain');
     final projectEnvironmentOverride =
         Platform.environment['FH_RADIO_STUDIO_DEV_UV_PROJECT_ENVIRONMENT'] ??
-        Platform.environment['FH_RADIO_STUDIO_UV_PROJECT_ENVIRONMENT'];
+        Platform.environment['FH_RADIO_STUDIO_UV_PROJECT_ENVIRONMENT'] ??
+        localDevelopmentConfig()['project_environment'] as String?;
     final wheelhouseDir =
         Platform.environment['FH_RADIO_STUDIO_DEV_WHEELHOUSE_DIR'] ??
         Platform.environment['FH_RADIO_STUDIO_WHEELHOUSE_DIR'];
@@ -780,10 +811,12 @@ class UvRuntime {
       cacheDir:
           Platform.environment['FH_RADIO_STUDIO_DEV_UV_CACHE_DIR'] ??
           Platform.environment['FH_RADIO_STUDIO_UV_CACHE_DIR'] ??
+          (localDevelopmentConfig()['uv_cache_dir'] as String?) ??
           _join(toolchainHome, 'uv', 'cache'),
       audioToolsDir:
           Platform.environment['FH_RADIO_STUDIO_DEV_AUDIO_TOOLS_DIR'] ??
           Platform.environment['FH_RADIO_STUDIO_AUDIO_TOOLS_DIR'] ??
+          (localDevelopmentConfig()['audio_tools_dir'] as String?) ??
           _join(toolchainHome, 'tools', 'audio'),
       aiModelDir:
           Platform.environment['FH_RADIO_STUDIO_DEV_AI_MODEL_DIR'] ??
@@ -797,6 +830,11 @@ class UvRuntime {
           Platform.environment['FH_RADIO_STUDIO_CLI_COMMAND'] ??
           'fh-radio-studio',
       wheelhouseDir: wheelhouseDir,
+      pythonInstallDir:
+          Platform.environment['FH_RADIO_STUDIO_DEV_PYTHON_INSTALL_DIR'] ??
+          Platform.environment['FH_RADIO_STUDIO_PYTHON_INSTALL_DIR'] ??
+          Platform.environment['UV_PYTHON_INSTALL_DIR'] ??
+          (localDevelopmentConfig()['python_install_dir'] as String?),
       networkCacheDir: networkCacheDir,
     );
   }

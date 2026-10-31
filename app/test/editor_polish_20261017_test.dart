@@ -84,7 +84,11 @@ void main() {
       await t.tap(find.text('修改快捷键'));
       await t.pumpAndSettle();
       final row = find.byKey(const ValueKey('shortcut-toggleSnap'));
-      await Scrollable.ensureVisible(t.element(row));
+      await t.scrollUntilVisible(
+        row,
+        300,
+        scrollable: find.byType(Scrollable).last,
+      );
       await t.pumpAndSettle();
       await t.tap(row);
       await t.sendKeyDownEvent(LogicalKeyboardKey.altLeft);

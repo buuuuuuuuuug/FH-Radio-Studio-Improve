@@ -90,7 +90,7 @@ class _FhRadioStudioAppState extends ConsumerState<FhRadioStudioApp>
     final mode = ref.watch(themeModeProvider);
 
     return MaterialApp.router(
-      title: 'FH Radio Studio · LoopLab',
+      title: 'FH Audio Studio',
       debugShowCheckedModeBanner: false,
       themeMode: mode,
       themeAnimationDuration: Duration.zero,

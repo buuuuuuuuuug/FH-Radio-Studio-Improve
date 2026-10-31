@@ -51,6 +51,12 @@ class TimingDialogFrame extends StatelessWidget {
     required this.actions,
     this.icon,
     this.description,
+    this.closeKey,
+    this.footer,
+    this.headerActions = const [],
+    this.showCloseHint = true,
+    this.editorStyle = false,
+    this.bodyPadding = const EdgeInsets.all(20),
   });
   final String title;
   final bool busy;
@@ -59,6 +65,12 @@ class TimingDialogFrame extends StatelessWidget {
   final List<Widget> actions;
   final String? icon;
   final String? description;
+  final Key? closeKey;
+  final Widget? footer;
+  final List<Widget> headerActions;
+  final bool showCloseHint;
+  final bool editorStyle;
+  final EdgeInsetsGeometry bodyPadding;
   @override
   Widget build(BuildContext context) {
     final rm = context.rm;
@@ -86,28 +98,35 @@ class TimingDialogFrame extends StatelessWidget {
               insetPadding: const EdgeInsets.all(24),
               clipBehavior: Clip.antiAlias,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(RmTokens.rLg),
+                borderRadius: BorderRadius.circular(
+                  editorStyle ? RmTokens.rXl : RmTokens.rLg,
+                ),
                 side: BorderSide(color: rm.borderStrong),
               ),
               child: ConstrainedBox(
                 constraints: BoxConstraints(
                   maxWidth: width,
-                  maxHeight: MediaQuery.sizeOf(context).height - 64,
+                  maxHeight:
+                      MediaQuery.sizeOf(context).height -
+                      (editorStyle ? 48 : 64),
                 ),
                 child: SizedBox(
+                  key: const ValueKey('timing-dialog-panel'),
                   width: width,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 14, 14, 14),
+                        padding: editorStyle
+                            ? const EdgeInsets.fromLTRB(16, 13, 14, 12)
+                            : const EdgeInsets.fromLTRB(20, 14, 14, 14),
                         child: Row(
                           children: [
                             if (icon != null) ...[
                               Container(
-                                width: 36,
-                                height: 36,
+                                width: editorStyle ? 34 : 36,
+                                height: editorStyle ? 34 : 36,
                                 decoration: BoxDecoration(
                                   color: rm.accent.bg,
                                   border: Border.all(color: rm.accent.ring),
@@ -147,12 +166,20 @@ class TimingDialogFrame extends StatelessWidget {
                                 ],
                               ),
                             ),
-                            Text(
-                              busy ? '正在处理…' : 'Esc 关闭',
-                              style: RmText.mono(10.5, color: rm.fg3),
-                            ),
-                            const SizedBox(width: 10),
+                            ...[
+                              for (final action in headerActions) ...[
+                                action,
+                                const SizedBox(width: 6),
+                              ],
+                            ],
+                            if (showCloseHint)
+                              Text(
+                                busy ? '正在处理…' : 'Esc 关闭',
+                                style: RmText.mono(10.5, color: rm.fg3),
+                              ),
+                            if (showCloseHint) const SizedBox(width: 10),
                             RmButton.icon(
+                              key: closeKey,
                               onPressed: busy ? null : close,
                               icon: Icon(Icons.close, size: 16, color: rm.fg3),
                               tooltip: '关闭',
@@ -163,23 +190,50 @@ class TimingDialogFrame extends StatelessWidget {
                       Divider(height: 1, color: rm.border),
                       Flexible(
                         child: SingleChildScrollView(
-                          padding: const EdgeInsets.all(20),
+                          padding: bodyPadding,
                           child: body,
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 14,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: editorStyle ? 12 : 20,
+                          vertical: editorStyle ? 10 : 14,
                         ),
                         decoration: BoxDecoration(
                           border: Border(top: BorderSide(color: rm.border)),
                         ),
-                        child: Wrap(
-                          alignment: WrapAlignment.end,
-                          spacing: 8,
-                          runSpacing: 6,
-                          children: actions,
+                        child: LayoutBuilder(
+                          builder: (context, box) {
+                            final buttons = Wrap(
+                              alignment: WrapAlignment.end,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 8,
+                              runSpacing: 6,
+                              children: actions,
+                            );
+                            if (footer == null) return buttons;
+                            if (box.maxWidth >= 820) {
+                              return Row(
+                                children: [
+                                  Expanded(child: footer!),
+                                  const SizedBox(width: 14),
+                                  buttons,
+                                ],
+                              );
+                            }
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                footer!,
+                                const SizedBox(height: 8),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: buttons,
+                                ),
+                              ],
+                            );
+                          },
                         ),
                       ),
                     ],
