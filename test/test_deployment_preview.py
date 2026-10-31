@@ -66,7 +66,7 @@ def test_preview_lists_actual_resources_settings_and_record_without_writing(proj
     p, game, package, _, args = project
     finish(package, args)
     manifest_path = package / "fh_radio_studio_package_manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["language"] = {"source_lang": "CHS", "target_lang": "JP", "preferred_lang": "JP"}
     manifest["stingers"]["banks"][0]["replaced"] = 16
     write(manifest_path, manifest)
@@ -144,7 +144,7 @@ def test_real_restore_is_explained_as_restore_not_custom_music(project):
     (game / "media/audio/FMODBanks/R4_Tracks_CU1.assets.bank").write_bytes(b"custom-before-restore")
     finish(package, args)
     manifest = package / "fh_radio_studio_package_manifest.json"
-    data = json.loads(manifest.read_text())
+    data = json.loads(manifest.read_text(encoding="utf-8"))
     data["restored_radios"] = [{"radio": 4}]
     write(manifest, data)
     result = preview(command(p, game, package))

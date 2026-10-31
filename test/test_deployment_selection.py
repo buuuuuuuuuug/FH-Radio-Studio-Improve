@@ -21,7 +21,7 @@ def setup(project, excluded):
     p, game, package, _, args = project
     finish(package, args)
     manifest_path = package / "fh_radio_studio_package_manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["language"] = {"preferred_lang": "JP"}
     write(manifest_path, manifest)
     options = [x for path in excluded for x in ("--exclude-file", path)]
@@ -53,7 +53,7 @@ def test_settings_only_does_not_copy_skipped_resources(project):
     before = snapshot(game)
     assert args.func(args) == 0
     assert snapshot(game) == before
-    assert (p / "UserPreferredLang").read_text() == "JP"
+    assert (p / "UserPreferredLang").read_text(encoding="utf-8") == "JP"
     assert not (p / ".fh-radio-studio/last_applied_package_manifest.json").exists()
 
 
@@ -63,7 +63,9 @@ def test_resource_write_skips_language_and_records_only_written_files(project):
     assert args.func(args) == 0
     assert not (p / "UserPreferredLang").exists()
     assert (game / BANK.replace("media/", "mediapc/", 1)).is_file()
-    record = json.loads((p / ".fh-radio-studio/last_applied_package_manifest.json").read_text())
+    record = json.loads(
+        (p / ".fh-radio-studio/last_applied_package_manifest.json").read_text(encoding="utf-8")
+    )
     assert len(record["package_files"]) == 2
 
 
@@ -87,7 +89,7 @@ def test_unknown_file_rejected_before_writing(project):
 def test_media_preview_keeps_choices_when_one_file_needs_a_backup(project):
     p, game, _, args = setup(project, [])
     baseline = p / "baseline.json"
-    data = json.loads(baseline.read_text())
+    data = json.loads(baseline.read_text(encoding="utf-8"))
     data["files"] = [f for f in data["files"] if f["install_relative_path"] != BANK]
     write(baseline, data)
     args.target_root = "media"
@@ -111,7 +113,7 @@ def test_independent_voice_selection_ignores_skipped_song_dependencies(project):
     write(game / voice, b"original voice")
     write(package / voice, b"new voice")
     manifest_path = package / "fh_radio_studio_package_manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["voices"] = {
         "banks": [
             {
